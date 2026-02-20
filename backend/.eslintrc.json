@@ -1,0 +1,85 @@
+{
+    "env": {
+        "es2022": true,
+        "node": true
+    },
+    "parserOptions": {
+        "ecmaVersion": 2022,
+        "sourceType": "module"
+    },
+    "plugins": [
+        "import"
+    ],
+    "extends": [
+        "eslint:recommended"
+    ],
+    "settings": {
+        "import/resolver": {
+            "node": {
+                "extensions": [
+                    ".js"
+                ]
+            }
+        }
+    },
+    "rules": {
+        "no-console": "warn",
+        "no-unused-vars": [
+            "error",
+            {
+                "argsIgnorePattern": "^_"
+            }
+        ],
+        "prefer-const": "error",
+        "no-var": "error",
+        "eqeqeq": [
+            "error",
+            "always"
+        ],
+        "curly": [
+            "error",
+            "all"
+        ],
+        "no-promise-executor-return": "error",
+        "no-await-in-loop": "warn",
+        "max-lines": [
+            "warn",
+            {
+                "max": 300,
+                "skipBlankLines": true,
+                "skipComments": true
+            }
+        ],
+        "max-lines-per-function": [
+            "warn",
+            {
+                "max": 55,
+                "skipBlankLines": true,
+                "skipComments": true
+            }
+        ],
+        "max-params": [
+            "warn",
+            5
+        ],
+        "import/no-cycle": "error",
+        "import/extensions": [
+            "error",
+            "ignorePackages",
+            {
+                "js": "always"
+            }
+        ]
+    },
+    "overrides": [
+        {
+            "files": [
+                "src/config/**/*.js",
+                "src/utils/logger.js"
+            ],
+            "rules": {
+                "no-console": "off"
+            }
+        }
+    ]
+}
