@@ -5,6 +5,7 @@ import {
     ShieldCheck, Sprout, ArrowRight, ExternalLink, ChevronLeft, ChevronRight,
     TreePine, Building2,
 } from 'lucide-react';
+import HowItWorksAnimated from '../components/HowItWorksAnimated';
 import {
     AreaChart, Area, XAxis, YAxis,
     CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -400,7 +401,10 @@ export default function Home() {
                 </div>
             </div>
 
-            {/* ══ 6. DUAL CTA ══════════════════════════════ */}
+            {/* ══ 6. HOW IT WORKS ANIMATED TIMELINE ════════ */}
+            <HowItWorksAnimated />
+
+            {/* ══ 7. DUAL CTA ══════════════════════════════ */}
             <div className="slide-up">
                 {/* Section heading */}
                 <div style={{ textAlign: 'center', marginBottom: '32px' }}>
