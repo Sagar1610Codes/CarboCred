@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain, useConnectors } from 'wagmi'
 import { hardhat } from 'wagmi/chains'
 import { formatEther } from 'viem'
 import { useEntityPosition } from './hooks/useEntityPosition'
 import { useActiveListings, useListCredits, usePurchaseListing, useCancelListing } from './hooks/useMarketplace'
 import { useLiveFeed } from './hooks/useLiveFeed'
+import { useCarbonAward } from './hooks/useCarbonAward'
+import { calculateCredits } from './lib/carbonCalculator'
 import { ListingStatus } from './lib/contracts'
 import './App.css'
 
@@ -40,9 +42,31 @@ export default function App() {
   const { purchase, isPending: isPurchasing, error: purchaseError } = usePurchaseListing()
   const { cancel, isPending: isCancelling } = useCancelListing()
   const { events, connected: wsConnected } = useLiveFeed()
+  const { isSubmitting, result, error: awardError, submitActivity, reset: resetAward } = useCarbonAward()
 
   const [listAmount, setListAmount] = useState('')
   const [listPriceEth, setListPriceEth] = useState('')
+  const [localListError, setLocalListError] = useState(null)
+
+  // ── Carbon calculator inputs ───────────────────────────────────────────────
+  const [calcInputs, setCalcInputs] = useState({
+    energyKwh: '', carbonEmittedKg: '', vehicleKm: '',
+    recycleKg: '', treesPlanted: '', cleanEnergyKwh: '',
+  })
+  const calcResult = useMemo(() => calculateCredits({
+    energyKwh: parseFloat(calcInputs.energyKwh) || 0,
+    carbonEmittedKg: parseFloat(calcInputs.carbonEmittedKg) || 0,
+    vehicleKm: parseFloat(calcInputs.vehicleKm) || 0,
+    recycleKg: parseFloat(calcInputs.recycleKg) || 0,
+    treesPlanted: parseFloat(calcInputs.treesPlanted) || 0,
+    cleanEnergyKwh: parseFloat(calcInputs.cleanEnergyKwh) || 0,
+  }), [calcInputs])
+
+  function setCalc(field, val) {
+    resetAward()
+    setLocalListError(null)
+    setCalcInputs(prev => ({ ...prev, [field]: val }))
+  }
 
   function handleConnect() {
     const connector = connectors[0]
@@ -51,7 +75,18 @@ export default function App() {
 
   function handleList(e) {
     e.preventDefault()
-    listCredits(BigInt(listAmount), listPriceEth)
+    setLocalListError(null)
+    if (netCredits < 0n) {
+      setLocalListError("You are currently a net emitter. You must offset your debt before you can sell credits.")
+      return
+    }
+    const amountBig = BigInt(listAmount)
+    if (netCredits < amountBig) {
+      setLocalListError(`Insufficient net credits. You only have ${netCredits.toString()} available to sell.`)
+      return
+    }
+
+    listCredits(amountBig, listPriceEth)
     setListAmount('')
     setListPriceEth('')
     setTimeout(() => { refetchListings(); refetchPos() }, 3000)
@@ -67,6 +102,12 @@ export default function App() {
     setTimeout(() => refetchListings(), 3000)
   }
 
+  async function handleAwardSubmit(e) {
+    e.preventDefault()
+    await submitActivity(address, calcResult.emissions, calcResult.reductions)
+    setTimeout(() => refetchPos(), 3000)
+  }
+
   return (
     <main className="app">
       {/* ── Header ─────────────────────────────────────────────────── */}
@@ -75,6 +116,9 @@ export default function App() {
           <span className="logo">🌿</span>
           <h1>CarboCred</h1>
           <span className="badge">ERC-1155 Marketplace</span>
+          <a href="/public-dashboard.html" className="nav-link">
+            Public Dashboard
+          </a>
         </div>
 
         {isConnected ? (
@@ -124,6 +168,117 @@ export default function App() {
             )}
           </section>
 
+          {/* Carbon Calculator */}
+          <section className="card">
+            <h2 className="section-title">🌱 Calculate &amp; Earn Credits</h2>
+            {!isConnected ? (
+              <p className="muted">Connect wallet to submit your activity</p>
+            ) : (
+              <form className="form" onSubmit={handleAwardSubmit}>
+
+                <p className="calc-group-label">📤 Emissions (your carbon footprint)</p>
+                <div className="calc-grid">
+                  <div className="form-field">
+                    <label>Energy consumed (kWh)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 250"
+                      value={calcInputs.energyKwh}
+                      onChange={e => setCalc('energyKwh', e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Direct CO₂ emitted (kg)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 80"
+                      value={calcInputs.carbonEmittedKg}
+                      onChange={e => setCalc('carbonEmittedKg', e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Vehicle distance (km)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 400"
+                      value={calcInputs.vehicleKm}
+                      onChange={e => setCalc('vehicleKm', e.target.value)} />
+                  </div>
+                </div>
+
+                <p className="calc-group-label">📥 Reductions (your offsets)</p>
+                <div className="calc-grid">
+                  <div className="form-field">
+                    <label>Waste recycled (kg)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 30"
+                      value={calcInputs.recycleKg}
+                      onChange={e => setCalc('recycleKg', e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Trees planted</label>
+                    <input type="number" min="0" step="1" placeholder="e.g. 5"
+                      value={calcInputs.treesPlanted}
+                      onChange={e => setCalc('treesPlanted', e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label>Clean energy generated (kWh)</label>
+                    <input type="number" min="0" step="any" placeholder="e.g. 150"
+                      value={calcInputs.cleanEnergyKwh}
+                      onChange={e => setCalc('cleanEnergyKwh', e.target.value)} />
+                  </div>
+                </div>
+
+                {/* Live result preview */}
+                <div className="calc-result">
+                  <div className="calc-result-row">
+                    <span className="muted">📤 Emissions</span>
+                    <span className="debt-val">−{calcResult.emissions.toFixed(2)} pts</span>
+                  </div>
+                  <div className="calc-result-row">
+                    <span className="muted">📥 Reductions</span>
+                    <span className="credit-val">+{calcResult.reductions.toFixed(2)} pts</span>
+                  </div>
+                  <div className="calc-result-row net-row">
+                    <span>Net impact</span>
+                    <span className={`calc-credits ${calcResult.net >= 0 ? 'positive' : 'negative'}`}>
+                      {calcResult.net >= 0 ? '+' : ''}{Math.floor(calcResult.net)}
+                    </span>
+                  </div>
+                  <div className="calc-submit-summary">
+                    {Math.floor(calcResult.reductions) > 0 && (
+                      <span className="credit-val">✦ Mint {Math.floor(calcResult.reductions)} credit tokens</span>
+                    )}
+                    {Math.floor(calcResult.emissions) > 0 && (
+                      <span className="debt-val">✦ Record {Math.floor(calcResult.emissions)} debt tokens</span>
+                    )}
+                  </div>
+                </div>
+
+
+                {/* Feedback */}
+                {awardError && <p className="error-text">{awardError}</p>}
+                {result && (
+                  <div className="calc-success">
+                    <span>✅ Submitted!</span>
+                    {result.awardTx && (
+                      <span>
+                        <span className="credit-val" style={{ fontSize: '0.7rem' }}>+Credits tx: </span>
+                        <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.awardTx}</span>
+                      </span>
+                    )}
+                    {result.debtTx && (
+                      <span>
+                        <span className="debt-val" style={{ fontSize: '0.7rem' }}>+Debt tx: </span>
+                        <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.debtTx}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-full"
+                  disabled={isSubmitting || (calcResult.emissions === 0 && calcResult.reductions === 0)}
+                  title={(calcResult.emissions === 0 && calcResult.reductions === 0) ? 'Enter at least one value' : undefined}
+                >
+                  {isSubmitting ? 'Submitting…' : 'Submit Activity'}
+                </button>
+              </form>
+            )}
+          </section>
+
           {/* List Credits Form */}
           <section className="card">
             <h2 className="section-title">List Credits for Sale</h2>
@@ -149,9 +304,14 @@ export default function App() {
                     placeholder="e.g. 0.01"
                   />
                 </div>
+                {localListError && <p className="error-text">{localListError}</p>}
                 {listError && <p className="error-text">{listError.message?.slice(0, 120)}</p>}
-                <button type="submit" className="btn btn-primary btn-full" disabled={isListing}>
-                  {isListing ? 'Waiting for wallet…' : 'List Credits'}
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-full"
+                  disabled={isListing || netCredits < 0n}
+                >
+                  {isListing ? 'Waiting for wallet…' : (netCredits < 0n ? 'Cannot Sell (Net Emitter)' : 'List Credits')}
                 </button>
               </form>
             )}

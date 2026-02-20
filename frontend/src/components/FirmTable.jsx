@@ -1,0 +1,146 @@
+/**
+ * components/FirmTable.jsx
+ *
+ * Sortable, responsive table of all participating firms.
+ * Shows: address (shortened), credits, debt, net position, status badge, last block.
+ * No wallet required.
+ */
+
+import { useState, useMemo } from 'react'
+
+const COLS = [
+    { key: 'address', label: 'Wallet Address' },
+    { key: 'credits', label: 'Credits' },
+    { key: 'debt', label: 'Debt' },
+    { key: 'net', label: 'Net Position' },
+    { key: 'lastBlock', label: 'Last Activity' },
+]
+
+function short(addr) {
+    if (!addr) return '—'
+    return `${addr.slice(0, 6)}…${addr.slice(-4)}`
+}
+
+function statusBadge(net) {
+    if (net > 0n) return <span className="ft-badge ft-badge--green">Net Positive</span>
+    if (net === 0n) return <span className="ft-badge ft-badge--gray">Neutral</span>
+    return <span className="ft-badge ft-badge--red">Net Negative</span>
+}
+
+function SortIcon({ dir }) {
+    return <span className="ft-sort-icon">{dir === 'asc' ? '↑' : '↓'}</span>
+}
+
+export function FirmTable({ firms, loading }) {
+    const [sortKey, setSortKey] = useState('net')
+    const [sortDir, setSortDir] = useState('desc')
+    const [filter, setFilter] = useState('')
+
+    function toggleSort(key) {
+        if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+        else { setSortKey(key); setSortDir('desc') }
+    }
+
+    const sorted = useMemo(() => {
+        const q = filter.toLowerCase()
+        const filtered = filter
+            ? firms.filter(f => f.address.toLowerCase().includes(q))
+            : firms
+
+        return [...filtered].sort((a, b) => {
+            let aVal = a[sortKey]
+            let bVal = b[sortKey]
+            if (sortKey === 'address') {
+                aVal = aVal.toLowerCase()
+                bVal = bVal.toLowerCase()
+                return sortDir === 'asc'
+                    ? aVal.localeCompare(bVal)
+                    : bVal.localeCompare(aVal)
+            }
+            // bigint / null comparisons
+            aVal = aVal ?? -1n
+            bVal = bVal ?? -1n
+            if (aVal < bVal) return sortDir === 'asc' ? -1 : 1
+            if (aVal > bVal) return sortDir === 'asc' ? 1 : -1
+            return 0
+        })
+    }, [firms, sortKey, sortDir, filter])
+
+    // ── Loading skeleton ──────────────────────────────────────────────────────
+    if (loading && firms.length === 0) {
+        return (
+            <div className="ft-wrap">
+                <div className="ft-skeleton-rows">
+                    {[...Array(5)].map((_, i) => (
+                        <div key={i} className="ft-skeleton-row" style={{ opacity: 1 - i * 0.15 }} />
+                    ))}
+                </div>
+            </div>
+        )
+    }
+
+    // ── Empty state ───────────────────────────────────────────────────────────
+    if (!loading && firms.length === 0) {
+        return (
+            <div className="ft-wrap ft-empty">
+                <span className="ft-empty-icon">📭</span>
+                <p>No firms found on-chain yet.</p>
+                <p className="ft-empty-sub">Award some credits via the main app first.</p>
+            </div>
+        )
+    }
+
+    return (
+        <div className="ft-wrap">
+            {/* Filter */}
+            <div className="ft-toolbar">
+                <input
+                    className="ft-filter"
+                    placeholder="Filter by address…"
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                />
+                <span className="ft-count">{sorted.length} firm{sorted.length !== 1 ? 's' : ''}</span>
+            </div>
+
+            {/* Table */}
+            <div className="ft-scroll">
+                <table className="ft-table">
+                    <thead>
+                        <tr>
+                            {COLS.map(col => (
+                                <th
+                                    key={col.key}
+                                    className={`ft-th ${sortKey === col.key ? 'ft-th--active' : ''}`}
+                                    onClick={() => toggleSort(col.key)}
+                                >
+                                    {col.label}
+                                    {sortKey === col.key && <SortIcon dir={sortDir} />}
+                                </th>
+                            ))}
+                            <th className="ft-th">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sorted.map(firm => (
+                            <tr key={firm.address} className="ft-row">
+                                <td className="ft-td ft-mono" title={firm.address}>
+                                    {short(firm.address)}
+                                </td>
+                                <td className="ft-td ft-green">{firm.credits.toString()}</td>
+                                <td className="ft-td ft-red">{firm.debt.toString()}</td>
+                                <td className={`ft-td ft-net ${firm.net >= 0n ? 'ft-green' : 'ft-red'}`}>
+                                    {firm.net >= 0n ? '+' : ''}{firm.net.toString()}
+                                </td>
+                                <td className="ft-td ft-muted">
+                                    {firm.lastBlock != null ? `Block #${firm.lastBlock.toString()}` : '—'}
+                                </td>
+                                <td className="ft-td">{statusBadge(firm.net)}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    )
+}

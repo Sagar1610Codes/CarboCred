@@ -29,10 +29,26 @@ function startListeners(onEvent) {
 
     provider = new ethers.WebSocketProvider(process.env.RPC_URL);
 
-    // Error handling for the WebSocket provider to prevent crashes
+    // Ethers-level error handler
     provider.on("error", (error) => {
         console.error("[Listener] Provider error:", error);
     });
+
+    // The underlying ws library emits a raw Node.js 'error' event BEFORE
+    // ethers can handle it. Without a listener, Node kills the process.
+    // Attach directly to the raw socket — immediately and again on 'open'.
+    const silenceRawWsError = () => {
+        const rawWs = provider._websocket ?? provider.websocket;
+        if (rawWs && rawWs.listenerCount("error") === 0) {
+            rawWs.on("error", (err) => {
+                console.error("[Listener] WebSocket error (kept alive):", err.message);
+            });
+        }
+    };
+    silenceRawWsError();
+    try {
+        (provider._websocket ?? provider.websocket)?.once?.("open", silenceRawWsError);
+    } catch (_) { }
 
     tokenContract = new ethers.Contract(
         process.env.CARBON_CREDIT_TOKEN_ADDRESS,

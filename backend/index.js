@@ -117,14 +117,27 @@ app.get("/position/:address", async (req, res) => {
 /**
  * POST /award
  * Award green energy credits to an entity (BACKEND_ROLE required).
- * Body: { entity: string, amount: number, reason: string }
+ * Body: { entity, amount, reason, signature? }
+ * - signature is OPTIONAL. Existing callers without it continue to work.
+ * - If signature is present, it must be a valid ethers.signMessage signature
+ *   from the entity address over the message "award:<amount>:<reason>".
  */
 app.post("/award", async (req, res) => {
     try {
-        const { entity, amount, reason } = req.body;
+        const { entity, amount, reason, signature } = req.body;
         if (!entity || !amount || !reason) {
             return res.status(400).json({ error: "entity, amount, reason required" });
         }
+
+        // Optional signature verification (backward-compatible)
+        if (signature) {
+            const message = `award:${amount}:${reason}`;
+            const recovered = ethers.verifyMessage(message, signature);
+            if (recovered.toLowerCase() !== entity.toLowerCase()) {
+                return res.status(400).json({ error: "Signature does not match entity" });
+            }
+        }
+
         const receipt = await awardCredits(entity, BigInt(amount), reason);
         res.json({ success: true, txHash: receipt.hash });
     } catch (err) {
@@ -132,6 +145,7 @@ app.post("/award", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 /**
  * POST /debt
