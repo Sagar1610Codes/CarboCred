@@ -61,10 +61,10 @@ PORT=4000
 Set-Content -Path "backend\.env" -Value $backendEnv
 
 $frontendEnv = @"
-NEXT_PUBLIC_CARBON_CREDIT_TOKEN_ADDRESS=$token
-NEXT_PUBLIC_MARKETPLACE_ADDRESS=$market
-NEXT_PUBLIC_BACKEND_WS_URL=ws://localhost:4000
-NEXT_PUBLIC_CHAIN_ID=31337
+VITE_CARBON_CREDIT_TOKEN_ADDRESS=$token
+VITE_MARKETPLACE_ADDRESS=$market
+VITE_BACKEND_WS_URL=ws://localhost:4000
+VITE_CHAIN_ID=31337
 "@
 Set-Content -Path "frontend\.env" -Value $frontendEnv
 
