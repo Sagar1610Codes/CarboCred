@@ -104,10 +104,14 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
         require(amount > 0,         "Marketplace: zero amount");
         require(pricePerCredit > 0, "Marketplace: zero price");
 
-        uint256 sellerCredits = creditToken.balanceOf(msg.sender, creditToken.CREDIT_TOKEN());
+        // ── Net position gate ────────────────────────────────────────────────
+        // Seller's net position (credits - debt) must cover the listing amount.
+        // This prevents a carbon emitter (net negative entity) from selling
+        // credits they hold but haven't yet used to offset their own debt.
+        int256 netPos = creditToken.netCredits(msg.sender);
         require(
-            sellerCredits >= amount,
-            "Marketplace: insufficient CREDIT_TOKEN balance"
+            netPos >= int256(amount),
+            "Marketplace: net credit position too low to list"
         );
 
         uint256 id = nextListingId++;

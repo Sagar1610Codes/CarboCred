@@ -181,18 +181,26 @@ describe("CarboCred Ecosystem (ERC-1155)", function () {
             expect(listing.status).to.equal(0n); // Open
         });
 
-        it("should revert listing when CREDIT_TOKEN balance < amount", async function () {
+        it("should revert listing when net position < amount", async function () {
             await expect(
                 marketplace.connect(seller).listCredits(500n, PRICE_PER_CREDIT)
-            ).to.be.revertedWith("Marketplace: insufficient CREDIT_TOKEN balance");
+            ).to.be.revertedWith("Marketplace: net credit position too low to list");
         });
 
         it("entity with only DEBT_TOKEN (net emitter) cannot list credits", async function () {
-            // attacker has no credits, only debt
+            // attacker has no credits, only debt → net = -50
             await creditToken.connect(backend).recordDebt(attacker.address, 50n, "emissions");
             await expect(
                 marketplace.connect(attacker).listCredits(10n, PRICE_PER_CREDIT)
-            ).to.be.revertedWith("Marketplace: insufficient CREDIT_TOKEN balance");
+            ).to.be.revertedWith("Marketplace: net credit position too low to list");
+        });
+
+        it("entity with credits but larger debt (net negative) cannot list", async function () {
+            // seller has 200 credits but 300 debt → net = -100
+            await creditToken.connect(backend).recordDebt(seller.address, 300n, "factory");
+            await expect(
+                marketplace.connect(seller).listCredits(10n, PRICE_PER_CREDIT)
+            ).to.be.revertedWith("Marketplace: net credit position too low to list");
         });
 
         it("should revert listing with zero amount", async function () {
