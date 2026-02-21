@@ -20,10 +20,10 @@ Write-Host "[1/6] Clearing stale processes..." -ForegroundColor Yellow
     if ($conn) {
         # A port can have multiple owners (e.g. IPv4 + IPv6). Kill all.
         $conn | ForEach-Object {
-            $pid = $_.OwningProcess
-            if ($pid -gt 4) {  # skip System (PID 4) and Idle (PID 0)
-                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-                Write-Host "   Killed PID $pid on port $port"
+            $procId = $_.OwningProcess
+            if ($procId -gt 4) {  # skip System (PID 4) and Idle (PID 0)
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                Write-Host "   Killed PID $procId on port $port"
             }
         }
     }
@@ -96,6 +96,10 @@ CARBON_CREDIT_TOKEN_ADDRESS=$token
 MARKETPLACE_ADDRESS=$market
 PORT=4000
 MONGO_URI=mongodb+srv://kasshan:Kasshan%402006@cluster0.vpcmj3u.mongodb.net/carbocred
+
+# Auth
+JWT_SECRET=b7baba3fef4261637786ddd744f082c02123ff4dc82be14d9b58664200871a131867cc8251a7cd27e42ec029f0a2a5d9
+ADMIN_SEED_KEY=c35d8658f5eba3c1a5dab38b9dc70b0ab6b72e03c74c2b61
 "@
 Set-Content -Path "$scriptDir\backend\.env" -Value $backendEnv
 

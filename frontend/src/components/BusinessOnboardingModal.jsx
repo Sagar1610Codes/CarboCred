@@ -21,14 +21,15 @@ export function BusinessOnboardingModal({ isOpen, onSubmit, loading, error, acco
   return (
     <div className="modal-overlay">
       <div className="modal-content">
-        <div className="modal-header">
-          <span className="logo">🌿</span>
-          <h2>Welcome to CarboCred</h2>
+        <div className="modal-icon-ring">
+          <span className="modal-icon">🌿</span>
         </div>
 
+        <h2 className="modal-title">Welcome to CarboCred</h2>
+
         <p className="modal-hint">
-          Please set your business name to get started.
-          Your identity is protected: we only store a hashed ID of your wallet.
+          Set your business name to get started. Your identity is protected —
+          only a hashed ID of your wallet is stored.
         </p>
 
         <form onSubmit={handleSubmit} className="form">
@@ -54,56 +55,102 @@ export function BusinessOnboardingModal({ isOpen, onSubmit, loading, error, acco
             className="btn btn-primary btn-full"
             disabled={loading || businessName.trim().length < 2}
           >
-            {loading ? 'Creating Profile...' : 'Complete Onboarding'}
+            {loading ? 'Creating Profile…' : 'Complete Onboarding →'}
           </button>
         </form>
       </div>
 
-      <style jsx>{`
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700;800&display=swap');
+
         .modal-overlay {
           position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(3, 7, 18, 0.9);
-          backdrop-filter: blur(8px);
+          inset: 0;
+          background: rgba(0, 0, 0, 0.85);
+          backdrop-filter: blur(16px);
+          -webkit-backdrop-filter: blur(16px);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000;
-          animation: fadeIn 0.3s ease;
+          animation: modalFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
         }
+
         .modal-content {
-          background: #0f172a;
-          border: 1px solid #1e293b;
-          border-radius: 1.25rem;
-          padding: 2rem;
+          background: linear-gradient(145deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          border-radius: 1.5rem;
+          padding: 2.25rem 2rem;
           max-width: 420px;
           width: 90%;
-          box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.1),
+            0 32px 80px rgba(0, 0, 0, 0.6),
+            0 0 0 1px rgba(255,255,255,0.03);
+          animation: modalSlideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+          position: relative;
+          overflow: hidden;
         }
-        .modal-header {
+
+        /* ambient green glow in corner */
+        .modal-content::after {
+          content: '';
+          position: absolute;
+          bottom: -40px;
+          right: -40px;
+          width: 180px;
+          height: 180px;
+          background: radial-gradient(circle, rgba(16,185,129,0.12) 0%, transparent 70%);
+          pointer-events: none;
+        }
+
+        .modal-icon-ring {
+          width: 48px;
+          height: 48px;
+          border-radius: 50%;
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.2);
           display: flex;
           align-items: center;
-          gap: 0.75rem;
-          margin-bottom: 1rem;
+          justify-content: center;
+          margin-bottom: 1.25rem;
+          font-size: 1.3rem;
         }
-        .modal-header h2 {
-          margin: 0;
-          font-size: 1.5rem;
+
+        .modal-title {
+          font-family: 'Space Grotesk', sans-serif;
+          font-size: 1.6rem;
           font-weight: 800;
-          letter-spacing: -0.025em;
+          letter-spacing: -0.03em;
+          color: #f8fafc;
+          margin: 0 0 0.75rem 0;
+          background: linear-gradient(135deg, #f8fafc 40%, #10b981 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
         }
+
         .modal-hint {
-          color: #94a3b8;
+          color: #64748b;
           font-size: 0.875rem;
-          line-height: 1.5;
-          margin-bottom: 2rem;
+          line-height: 1.6;
+          margin-bottom: 1.75rem;
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
+
+        @keyframes modalFadeIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
+
+        @keyframes modalSlideUp {
+          from {
+            opacity: 0;
+            transform: translateY(24px) scale(0.97);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
         }
       `}</style>
     </div>

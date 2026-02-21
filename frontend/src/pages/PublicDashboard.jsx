@@ -6,6 +6,7 @@
  * Accessible at: http://localhost:3000/public-dashboard.html (dev)
  */
 
+import { motion } from 'framer-motion'
 import { usePublicCarbonData } from '../hooks/usePublicCarbonData'
 import { GlobalStats } from '../components/GlobalStats'
 import { FirmTable } from '../components/FirmTable'
@@ -22,9 +23,19 @@ export default function PublicDashboard() {
         : null
 
     return (
-        <div className="pd-root">
+        <motion.div
+            className="pd-root"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6 }}
+        >
             {/* ── Header ─────────────────────────────────────────────────────── */}
-            <header className="pd-header">
+            <motion.header
+                className="pd-header"
+                initial={{ y: -50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 100, damping: 20 }}
+            >
                 <div className="pd-header-left">
                     <span className="pd-logo">🌿</span>
                     <div>
@@ -46,24 +57,30 @@ export default function PublicDashboard() {
                             </span>
                         )}
                     </div>
-                    <button
+                    <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
                         className="pd-btn pd-btn--outline"
                         onClick={refresh}
                         disabled={loading}
                     >
                         {loading ? 'Loading…' : '⟳ Refresh'}
-                    </button>
+                    </motion.button>
                     <a href="/" className="pd-btn pd-btn--ghost">← Back to App</a>
                 </div>
-            </header>
+            </motion.header>
 
             <main className="pd-main">
                 {/* ── Error banner ─────────────────────────────────────────────── */}
                 {error && (
-                    <div className="pd-error-banner">
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="pd-error-banner"
+                    >
                         <strong>⚠️ RPC Error</strong> — {error}
                         <button className="pd-btn pd-btn--sm pd-btn--outline" onClick={refresh}>Retry</button>
-                    </div>
+                    </motion.div>
                 )}
 
                 {/* ── Global Stats ──────────────────────────────────────────────── */}
@@ -87,6 +104,6 @@ export default function PublicDashboard() {
             <footer className="pd-footer">
                 <span>CarboCred · Fully on-chain · No database · Open source</span>
             </footer>
-        </div>
+        </motion.div>
     )
 }

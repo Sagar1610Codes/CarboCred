@@ -1,12 +1,5 @@
-/**
- * components/FirmTable.jsx
- *
- * Sortable, responsive table of all participating firms.
- * Shows: address (shortened), credits, debt, net position, status badge, last block.
- * No wallet required.
- */
-
 import { useState, useMemo } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 
 const COLS = [
     { key: 'address', label: 'Firm Identity' },
@@ -91,7 +84,12 @@ export function FirmTable({ firms, loading }) {
     }
 
     return (
-        <div className="ft-wrap">
+        <motion.div
+            className="ft-wrap"
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+        >
             {/* Filter */}
             <div className="ft-toolbar">
                 <input
@@ -121,9 +119,22 @@ export function FirmTable({ firms, loading }) {
                             <th className="ft-th">Status</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <motion.tbody
+                        initial="hidden"
+                        animate="visible"
+                        variants={{
+                            visible: { transition: { staggerChildren: 0.03 } }
+                        }}
+                    >
                         {sorted.map(firm => (
-                            <tr key={firm.address} className="ft-row">
+                            <motion.tr
+                                key={firm.address}
+                                className="ft-row"
+                                variants={{
+                                    hidden: { opacity: 0, x: -5 },
+                                    visible: { opacity: 1, x: 0 }
+                                }}
+                            >
                                 <td className="ft-td" title={firm.address}>
                                     {firm.businessName ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -143,11 +154,11 @@ export function FirmTable({ firms, loading }) {
                                     {firm.lastBlock != null ? `Block #${firm.lastBlock.toString()}` : '—'}
                                 </td>
                                 <td className="ft-td">{statusBadge(firm.net)}</td>
-                            </tr>
+                            </motion.tr>
                         ))}
-                    </tbody>
+                    </motion.tbody>
                 </table>
             </div>
-        </div>
+        </motion.div>
     )
 }

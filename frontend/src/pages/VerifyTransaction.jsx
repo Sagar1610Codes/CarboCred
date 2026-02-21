@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { QRScanner } from '../components/QRScanner';
 import { useTxVerification } from '../hooks/useTxVerification';
+import { SpotlightCard } from '../components/SpotlightCard';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
 
@@ -24,7 +26,6 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
     useEffect(() => {
         if (!receipt?.from) { setFirmName(null); return; }
 
-        // Backend stores profiles keyed by SHA-256(lowercase wallet address)
         const hashAddress = async (address) => {
             const encoded = new TextEncoder().encode(address.toLowerCase());
             const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
@@ -43,7 +44,7 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
     const handleScanSuccess = (decodedHash) => {
         setInputHash(decodedHash);
         setActiveHash(decodedHash);
-        setMode('MANUAL'); // Swap to results view
+        setMode('MANUAL');
     };
 
     const handleManualVerify = (e) => {
@@ -59,196 +60,261 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
         setMode('SCAN');
     };
 
-    // Helper Renderer for the Result Box
     const renderVerificationStatus = () => {
         if (!activeHash) {
             return (
-                <div className="p-8 text-center text-slate-500 border border-slate-700/50 rounded-xl bg-slate-800/30 border-dashed">
-                    Input a transaction hash to begin blockchain verification.
-                </div>
+                <motion.div
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                    style={s.statusPlaceholder}
+                >
+                    Input a transaction hash or scan a QR code to begin blockchain verification.
+                </motion.div>
             );
         }
 
         if (loading) {
             return (
-                <div className="p-8 text-center border border-slate-700/50 rounded-xl bg-slate-800/80 animate-pulse">
-                    <span className="text-3xl block mb-3">📡</span>
-                    <h3 className="text-xl font-bold text-white mb-1">Querying RPC Nodes</h3>
-                    <p className="text-slate-400 text-sm">Validating transaction signature on the blockchain...</p>
-                </div>
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    style={s.statusCard}
+                >
+                    <span style={s.statusIconLarge}>📡</span>
+                    <h3 style={s.statusTitle}>Querying RPC Nodes</h3>
+                    <p style={s.statusText}>Validating transaction signature on the blockchain...</p>
+                    <div style={s.loaderBar}><div style={s.loaderProgress} /></div>
+                </motion.div>
             );
         }
 
         if (error || !exists) {
             return (
-                <div className="p-8 border border-red-900/50 rounded-xl bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
-                    <div className="flex items-center gap-3 mb-4">
-                        <span className="text-3xl">❌</span>
-                        <h3 className="text-2xl font-bold text-red-500">Verification Failed</h3>
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    style={s.errorCard}
+                >
+                    <div style={s.cardHead}>
+                        <span style={s.statusIcon}>❌</span>
+                        <h3 style={s.errorTitle}>Verification Failed</h3>
                     </div>
-                    <p className="text-red-200/80 mb-2">The requested transaction could not be located on the blockchain.</p>
-
-                    {error && (
-                        <div className="mt-4 p-3 bg-red-900/40 border border-red-800 rounded-lg text-sm text-red-300 font-mono break-all">
-                            {error}
-                        </div>
-                    )}
-                </div>
+                    <p style={s.errorText}>The requested transaction could not be located on the blockchain.</p>
+                    {error && <div style={s.errorDetail}>{error}</div>}
+                </motion.div>
             );
         }
 
-        // If it got here, it's exists === true
         if (!confirmed) {
             return (
-                <div className="p-8 border border-yellow-700/50 rounded-xl bg-yellow-900/20 shadow-[0_0_15px_rgba(234,179,8,0.1)]">
-                    <div className="flex items-center gap-3 mb-4">
-                        <span className="text-3xl animate-spin">⏳</span>
-                        <h3 className="text-2xl font-bold text-yellow-500">Pending Confirmation</h3>
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    style={s.pendingCard}
+                >
+                    <div style={s.cardHead}>
+                        <motion.span
+                            animate={{ rotate: 360 }}
+                            transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
+                            style={s.statusIcon}
+                        >
+                            ⏳
+                        </motion.span>
+                        <h3 style={s.pendingTitle}>Pending Confirmation</h3>
                     </div>
-                    <p className="text-yellow-200/80">The transaction exists in the mempool but has not yet been minted into a block. Try again in a few seconds.</p>
-                </div>
+                    <p style={s.pendingText}>The transaction exists in the mempool but has not yet been minted into a block.</p>
+                </motion.div>
             );
         }
 
-        // Fully Confirmed Success State
         return (
-            <div className="p-8 border border-green-700/50 rounded-xl bg-green-900/20 shadow-[0_0_30px_rgba(34,197,94,0.15)] transition-all">
-                <div className="flex items-center gap-3 mb-6 border-b border-green-800/50 pb-4">
-                    <div className="w-12 h-12 rounded-full bg-green-500 flex items-center justify-center text-2xl shadow-lg shadow-green-500/30">
-                        ✅
-                    </div>
+            <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                style={s.successCard}
+            >
+                <div style={s.successHeader}>
+                    <div style={s.checkIcon}>✅</div>
                     <div>
-                        <h3 className="text-2xl font-bold text-green-400 tracking-tight">Verification Successful</h3>
-                        <p className="text-green-200/70 text-sm">Blockchain consensus confirmed.</p>
+                        <h3 style={s.successTitle}>Verified Successful</h3>
+                        <p style={s.successSub}>Blockchain consensus confirmed.</p>
                     </div>
                 </div>
 
-                <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-700/50">
-                            <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Block Number</span>
-                            <span className="text-lg text-slate-200 font-mono font-bold">
-                                {receipt.blockNumber.toLocaleString()}
-                            </span>
-                        </div>
-                        <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-700/50">
-                            <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Timestamp</span>
-                            <span className="text-md text-slate-200">
-                                {timestamp || 'N/A'}
-                            </span>
-                        </div>
+                <div style={s.resultGrid}>
+                    <div style={s.resultBox}>
+                        <span style={s.resLabel}>Block Number</span>
+                        <span style={s.resValMono}>{receipt.blockNumber.toLocaleString()}</span>
                     </div>
-
-                    <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-700/50 overflow-hidden">
-                        <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Transaction Hash</span>
-                        <div className="text-sm text-green-300 font-mono truncate select-all">
-                            {activeHash}
-                        </div>
+                    <div style={s.resultBox}>
+                        <span style={s.resLabel}>Timestamp</span>
+                        <span style={s.resVal}>{timestamp || 'N/A'}</span>
                     </div>
-
-                    <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-700/50 overflow-hidden">
-                        <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Firm Name</span>
-                        <div className="text-sm text-slate-300 font-semibold">
-                            {firmName ? firmName : (
-                                <span className="font-mono text-slate-400 text-xs break-all">{receipt.from}</span>
-                            )}
+                    <div style={{ ...s.resultBox, gridColumn: 'span 2' }}>
+                        <span style={s.resLabel}>Transaction Hash</span>
+                        <div style={s.resValSmallMono}>{activeHash}</div>
+                    </div>
+                    <div style={{ ...s.resultBox, gridColumn: 'span 2' }}>
+                        <span style={s.resLabel}>Firm / Entity</span>
+                        <div style={s.resVal}>
+                            {firmName ? firmName : receipt.from}
                         </div>
                     </div>
                 </div>
-            </div>
+            </motion.div>
         );
     };
 
     return (
-        <div className="max-w-5xl mx-auto py-8 px-4 w-full">
-            {/* Page Header */}
-            <div className="flex flex-col md:flex-row items-center justify-between mb-10 gap-4">
+        <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            style={s.page}
+        >
+            <div style={s.header}>
                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Public Verification Node</h1>
-                    <p className="text-slate-400 max-w-xl">
-                        Trustlessly verify Carbon Credit minting trails. Validate generated QR checks directly against the EVM RPC node. No centralized database is used.
+                    <h1 style={s.title}>Public Verification Node</h1>
+                    <p style={s.subtitle}>
+                        Trustlessly verify Carbon Credit minting trails. Validate generated QR checks directly against the EVM RPC node.
                     </p>
                 </div>
                 {onReturnHome && (
-                    <button onClick={onReturnHome} className="btn btn-outline text-sm">
+                    <button onClick={onReturnHome} className="btn btn-outline">
                         Back to App
                     </button>
                 )}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-
-                {/* Control Panel (Left column on large screens) */}
-                <div className="lg:col-span-5 space-y-6">
-
-                    {/* Mode Toggle Tabs */}
-                    <div className="flex bg-slate-800/80 p-1 rounded-xl border border-slate-700">
+            <div style={s.layout}>
+                <div style={s.side}>
+                    <div style={s.tabs}>
                         <button
-                            className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-colors ${mode === 'SCAN' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-300'}`}
+                            style={mode === 'SCAN' ? s.tabActive : s.tab}
                             onClick={() => setMode('SCAN')}
                         >
                             📷 Scanner Mode
                         </button>
                         <button
-                            className={`flex-1 py-3 text-sm font-semibold rounded-lg transition-colors ${mode === 'MANUAL' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-300'}`}
+                            style={mode === 'MANUAL' ? s.tabActive : s.tab}
                             onClick={() => setMode('MANUAL')}
                         >
                             ⌨️ Manual Hash
                         </button>
                     </div>
 
-                    {/* Scanner Injector */}
-                    {mode === 'SCAN' && (
-                        <div className="animate-in fade-in duration-300">
-                            <QRScanner onScanSuccess={handleScanSuccess} />
-                        </div>
-                    )}
+                    <AnimatePresence mode="wait">
+                        {mode === 'SCAN' ? (
+                            <motion.div
+                                key="scan"
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: 10 }}
+                                style={s.panel}
+                            >
+                                <QRScanner onScanSuccess={handleScanSuccess} />
+                            </motion.div>
+                        ) : (
+                            <motion.div
+                                key="manual"
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: 10 }}
+                                style={s.panel}
+                            >
+                                <SpotlightCard style={s.formCard}>
+                                    <form onSubmit={handleManualVerify} style={s.form}>
+                                        <div style={s.field}>
+                                            <label style={s.label}>Transaction Hash (0x)</label>
+                                            <input
+                                                type="text"
+                                                placeholder="0x..."
+                                                style={s.input}
+                                                value={inputHash}
+                                                onChange={(e) => setInputHash(e.target.value)}
+                                            />
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={loading || !inputHash}
+                                            className="btn btn-primary btn-full"
+                                        >
+                                            {loading ? 'Verifying...' : 'Verify Transaction'}
+                                        </button>
 
-                    {/* Manual Input Form */}
-                    {mode === 'MANUAL' && (
-                        <div className="p-6 bg-slate-800/80 border border-slate-700 rounded-2xl shadow-xl animate-in fade-in duration-300">
-                            <form onSubmit={handleManualVerify} className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-2">Transaction Hash (0x)</label>
-                                    <input
-                                        type="text"
-                                        placeholder="0x..."
-                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-slate-200 font-mono text-sm focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                                        value={inputHash}
-                                        onChange={(e) => setInputHash(e.target.value)}
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    disabled={loading || !inputHash}
-                                    className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors"
-                                >
-                                    {loading ? 'Verifying...' : 'Verify Transaction'}
-                                </button>
-
-                                {activeHash && (
-                                    <button
-                                        type="button"
-                                        onClick={resetScanner}
-                                        className="w-full py-2 mt-2 text-slate-400 hover:text-white text-sm transition-colors"
-                                    >
-                                        Scan another code
-                                    </button>
-                                )}
-                            </form>
-                        </div>
-                    )}
-
+                                        {activeHash && (
+                                            <button
+                                                type="button"
+                                                onClick={resetScanner}
+                                                style={s.btnReset}
+                                            >
+                                                Scan another code
+                                            </button>
+                                        )}
+                                    </form>
+                                </SpotlightCard>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
                 </div>
 
-                {/* Results Panel (Right column on large screens) */}
-                <div className="lg:col-span-7">
-                    <div className="sticky top-8">
+                <div style={s.main}>
+                    <div style={s.sticky}>
                         {renderVerificationStatus()}
                     </div>
                 </div>
-
             </div>
-        </div>
+        </motion.div>
     );
 }
+
+const s = {
+    page: { maxWidth: '1000px', margin: '0 auto', padding: '2rem 1.5rem', width: '100%' },
+    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', gap: '1rem', flexWrap: 'wrap' },
+    title: { fontFamily: "'Space Grotesk', sans-serif", fontSize: '2rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.4rem' },
+    subtitle: { color: 'var(--obs-text-3)', fontSize: '0.95rem', maxWidth: '600px', lineHeight: 1.5 },
+    layout: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem' },
+    side: { display: 'flex', flexDirection: 'column', gap: '1.5rem' },
+    main: { minHeight: '300px' },
+    sticky: { position: 'sticky', top: '2rem' },
+    tabs: { display: 'flex', background: 'var(--obs-surface)', padding: '0.25rem', borderRadius: '0.85rem', border: '1px solid var(--obs-border)' },
+    tab: { flex: 1, padding: '0.75rem', fontSize: '0.85rem', fontWeight: 600, color: 'var(--obs-text-3)', background: 'none', border: 'none', cursor: 'pointer', borderRadius: '0.65rem', transition: 'all 0.2s' },
+    tabActive: { flex: 1, padding: '0.75rem', fontSize: '0.85rem', fontWeight: 700, color: '#fff', background: 'var(--obs-surface-2)', border: 'none', cursor: 'default', borderRadius: '0.65rem', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' },
+    panel: { width: '100%' },
+    formCard: { background: 'var(--obs-surface)', border: '1px solid var(--obs-border)', borderRadius: '1rem', padding: '1.5rem' },
+    form: { display: 'flex', flexDirection: 'column', gap: '1.25rem' },
+    field: { display: 'flex', flexDirection: 'column', gap: '0.5rem' },
+    label: { fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--obs-text-3)' },
+    input: { background: 'var(--obs-surface-2)', border: '1px solid var(--obs-border)', borderRadius: '0.65rem', padding: '0.75rem 1rem', color: '#fff', fontFamily: 'monospace', fontSize: '0.9rem', outline: 'none' },
+    btnReset: { background: 'none', border: 'none', color: 'var(--obs-text-3)', fontSize: '0.8rem', cursor: 'pointer', marginTop: '0.5rem' },
+
+    // Status Cards
+    statusPlaceholder: { padding: '3rem 2rem', textAlign: 'center', color: 'var(--obs-text-3)', border: '2px dashed var(--obs-border)', borderRadius: '1rem', fontSize: '0.95rem' },
+    statusCard: { padding: '2.5rem', textAlign: 'center', background: 'var(--obs-surface)', border: '1px solid var(--obs-border)', borderRadius: '1.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' },
+    statusIconLarge: { fontSize: '2.5rem' },
+    statusTitle: { fontSize: '1.25rem', fontWeight: 700, color: '#fff', margin: 0 },
+    statusText: { color: 'var(--obs-text-2)', fontSize: '0.9rem' },
+    loaderBar: { width: '100%', height: '4px', background: 'var(--obs-border)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' },
+    loaderProgress: { width: '40%', height: '100%', background: '#10b981', animation: 'load 1.5s infinite ease-in-out' },
+
+    errorCard: { padding: '2rem', background: 'rgba(248,113,113,0.05)', border: '1px solid rgba(248,113,113,0.2)', borderRadius: '1rem' },
+    cardHead: { display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' },
+    statusIcon: { fontSize: '1.5rem' },
+    errorTitle: { fontSize: '1.25rem', fontWeight: 700, color: '#f87171', margin: 0 },
+    errorText: { color: 'rgba(248,113,113,0.8)', fontSize: '0.95rem', marginBottom: '1rem' },
+    errorDetail: { padding: '0.75rem', background: 'rgba(0,0,0,0.3)', borderRadius: '0.5rem', color: '#fca5a5', fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all' },
+
+    pendingCard: { padding: '2rem', background: 'rgba(234,179,8,0.05)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '1rem' },
+    pendingTitle: { fontSize: '1.25rem', fontWeight: 700, color: '#eab308', margin: 0 },
+    pendingText: { color: 'rgba(234,179,8,0.8)', fontSize: '0.95rem' },
+
+    successCard: { padding: '2rem', background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '1.25rem', boxShadow: '0 0 40px -10px rgba(16,185,129,0.1)' },
+    successHeader: { display: 'flex', alignItems: 'center', gap: '1rem', paddingBottom: '1.5rem', borderBottom: '1px solid rgba(16,185,129,0.1)', marginBottom: '1.5rem' },
+    checkIcon: { width: '44px', height: '44px', background: '#10b981', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', boxShadow: '0 4px 12px rgba(16,185,129,0.3)' },
+    successTitle: { fontSize: '1.4rem', fontWeight: 800, color: '#34d399', margin: 0 },
+    successSub: { color: 'rgba(16,185,129,0.7)', fontSize: '0.85rem' },
+    resultGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' },
+    resultBox: { padding: '0.85rem 1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '0.75rem', border: '1px solid var(--obs-border)' },
+    resLabel: { fontSize: '0.65rem', fontWeight: 700, color: 'var(--obs-text-3)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.25rem' },
+    resVal: { color: '#f8fafc', fontWeight: 600, fontSize: '0.95rem' },
+    resValMono: { color: '#f8fafc', fontWeight: 700, fontSize: '1.1rem', fontFamily: 'monospace' },
+    resValSmallMono: { color: '#34d399', fontSize: '0.75rem', fontFamily: 'monospace', wordBreak: 'break-all', opacity: 0.8 }
+};

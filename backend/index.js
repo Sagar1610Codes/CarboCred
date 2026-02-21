@@ -11,10 +11,15 @@
  *   │    → all connected frontend clients             │
  *   │                                                 │
  *   │  HTTP REST API  (http://:4000)                  │
- *   │    GET /position/:address   → on-chain read     │
- *   │    POST /award              → BACKEND_ROLE tx   │
- *   │    POST /debt               → BACKEND_ROLE tx   │
- *   │    POST /clear-debt         → BACKEND_ROLE tx   │
+ *   │    POST /auth/register    → create account      │
+ *   │    POST /auth/login       → returns JWT         │
+ *   │    GET  /auth/me          → current user        │
+ *   │    GET  /position/:address → on-chain read      │
+ *   │    POST /award             → BACKEND_ROLE tx    │
+ *   │    POST /debt              → BACKEND_ROLE tx    │
+ *   │    POST /api/requests      → queue (auth)       │
+ *   │    GET  /api/requests/pending → admin only      │
+ *   │    POST /api/requests/:id/approve → admin only  │
  *   └─────────────────────────────────────────────────┘
  *
  * No mutable state is stored locally for balances.
@@ -43,10 +48,12 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.use(express.json());
 
-// Allow frontend dev server (localhost:3000) during development
+// CORS — allow all origins (dev mode)
 app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
 });
 
@@ -192,8 +199,14 @@ app.post("/clear-debt", async (req, res) => {
     }
 });
 
+// ── Auth Routes ───────────────────────────────────────────────────────────
+app.use("/auth", require("./src/routes/auth.routes"));
+
 // ── Identity Routes ───────────────────────────────────────────────────────
 app.use("/entity", require("./src/routes/entityProfile.routes"));
+
+// ── Credit Request Routes (Admin Validation Workflow) ─────────────────────
+app.use("/api/requests", require("./src/routes/creditRequest.routes"));
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok" }));

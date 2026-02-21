@@ -1,8 +1,4 @@
-/**
- * components/GlobalStats.jsx
- * Displays global carbon credit totals computed from on-chain data.
- * Read-only. No wallet required.
- */
+import { motion } from 'framer-motion'
 
 export function GlobalStats({ stats, loading }) {
     const cards = [
@@ -45,9 +41,23 @@ export function GlobalStats({ stats, loading }) {
     ]
 
     return (
-        <div className="gs-grid">
+        <motion.div
+            className="gs-grid"
+            initial="hidden"
+            animate="visible"
+            variants={{
+                visible: { transition: { staggerChildren: 0.1 } }
+            }}
+        >
             {cards.map(card => (
-                <div key={card.label} className={`gs-card gs-card--${card.color}`}>
+                <motion.div
+                    key={card.label}
+                    className={`gs-card gs-card--${card.color}`}
+                    variants={{
+                        hidden: { opacity: 0, scale: 0.95 },
+                        visible: { opacity: 1, scale: 1 }
+                    }}
+                >
                     <span className="gs-icon">{card.icon}</span>
                     <div className="gs-body">
                         <p className="gs-label">{card.label}</p>
@@ -56,8 +66,8 @@ export function GlobalStats({ stats, loading }) {
                             : <p className="gs-value">{card.value}</p>
                         }
                     </div>
-                </div>
+                </motion.div>
             ))}
-        </div>
+        </motion.div>
     )
 }

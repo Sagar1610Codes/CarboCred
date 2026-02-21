@@ -1,145 +1,200 @@
-# CarboCred — Architecture & Developer Guide
+# CarboCred — Complete System Architecture
 
-> **Stack:** Solidity (Hardhat) · Node.js (Express + WS) · React + Vite (plain JS)
+> A decentralised carbon-credit marketplace built on Ethereum (ERC-1155).  
+> This document covers every layer of the system so the project can be rebuilt from scratch.
 
 ---
 
 ## Table of Contents
 
-1. [Big Picture Overview](#1-big-picture-overview)
-2. [Layer 1 — Smart Contracts](#2-layer-1--smart-contracts)
-3. [Layer 2 — Backend (Node.js)](#3-layer-2--backend-nodejs)
-4. [Layer 3 — Frontend (React + Vite)](#4-layer-3--frontend-react--vite)
-5. [Workflow Walkthroughs](#5-workflow-walkthroughs)
-6. [How to Make Your Own Changes](#6-how-to-make-your-own-changes)
-7. [Environment Variables Reference](#7-environment-variables-reference)
+1. [High-Level Overview](#1-high-level-overview)
+2. [System Architecture Diagram](#2-system-architecture-diagram)
+3. [Technology Stack](#3-technology-stack)
+4. [Layer 1 — Smart Contracts](#4-layer-1--smart-contracts)
+   - 4.1 CarbonCreditToken (ERC-1155)
+   - 4.2 CarbonMarketplace
+   - 4.3 Access Control & Roles
+   - 4.4 Key Design Decisions
+5. [Layer 2 — Backend Server](#5-layer-2--backend-server)
+   - 5.1 index.js – HTTP + WebSocket Server
+   - 5.2 signer.js – Backend Wallet
+   - 5.3 listener.js – Blockchain Event Relay
+   - 5.4 MongoDB / EntityProfile
+   - 5.5 REST API Reference
+6. [Layer 3 — Frontend](#6-layer-3--frontend)
+   - 6.1 App Entry Point & Routing
+   - 6.2 Wallet Connection (wagmi + viem)
+   - 6.3 Contract Addresses & ABIs
+   - 6.4 React Hooks
+   - 6.5 Pages
+   - 6.6 Components
+   - 6.7 Utility Libraries
+   - 6.8 Carbon Calculator
+7. [Data Flow Walkthroughs](#7-data-flow-walkthroughs)
+   - 7.1 Earning Credits (Activity Submission)
+   - 7.2 Listing Credits for Sale
+   - 7.3 Buying Credits from the Marketplace
+   - 7.4 Real-Time Event Feed
+   - 7.5 Business Onboarding
+8. [Environment Variables Reference](#8-environment-variables-reference)
+9. [Directory Structure](#9-directory-structure)
+10. [Local Development Setup](#10-local-development-setup)
+11. [Deployment (Sepolia Testnet)](#11-deployment-sepolia-testnet)
+12. [Security Design](#12-security-design)
 
 ---
 
-## 1. Big Picture Overview
+## 1. High-Level Overview
+
+CarboCred is a three-tier, blockchain-anchored application:
+
+| Tier | Technology | Role |
+|------|-----------|------|
+| **Smart Contracts** | Solidity 0.8.24 / Hardhat | Source of truth for all token balances and trades |
+| **Backend** | Node.js / Express / Ethers.js v6 | Privileged signer, WebSocket relay, business identity |
+| **Frontend** | React / Vite / wagmi / viem | User wallet interface, marketplace UI, analytics |
+
+**Core concept:**  
+Every entity (person or company) has an on-chain _carbon position_:
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Hardhat / Ethereum                         │
-│                                                               │
-│   CarbonCreditToken.sol ◄──────► CarbonMarketplace.sol       │
-│    ERC-1155 balances                listing / trading         │
-└──────────────┬───────────────────────────┬────────────────────┘
-               │ events (WebSocket RPC)    │ reads + writes (HTTP RPC)
-               ▼                           ▼
-┌──────────────────────────┐  ┌──────────────────────────────────┐
-│  Backend  (Node.js :4000) │  │  Frontend  (React+Vite :3000)    │
-│                            │  │                                   │
-│  signer.js                 │  │  main.jsx   — entry + providers   │
-│   └─ BACKEND_ROLE wallet   │  │  App.jsx    — full dashboard      │
-│  listener.js               │  │                                   │
-│   └─ contract event subs   │──WS──►  hooks/useLiveFeed.js        │
-│  index.js                  │  │  hooks/useEntityPosition.js       │
-│   └─ REST /award /debt … ◄─│──│  hooks/useMarketplace.js         │
-└──────────────────────────┘  │  lib/contracts.js  — ABIs + addrs  │
-                               │  lib/wagmiConfig.js — chain config  │
-                               └──────────────────────────────────────┘
+net = CREDIT_TOKEN balance − DEBT_TOKEN balance
 ```
 
-### Three layers, one rule
+- **Positive net** → the entity has offset more than it emitted (net offset holder).
+- **Negative net** → the entity owes carbon credits to cover its emissions (net emitter).
 
-| Layer | Tech | Responsibility |
-|---|---|---|
-| Smart Contracts | Solidity 0.8.24 + Hardhat | **Single source of truth** for all balances |
-| Backend | Node.js, Express, ethers.js v6 | Event relay + privileged write ops |
-| Frontend | React 19 + Vite, wagmi v2, viem | Wallet UI + direct contract reads |
-
-> **No off-chain database.** All balance data is read directly from the contract.
-> The backend only writes (mints/burns) using its privileged `BACKEND_ROLE` wallet.
+Credits are ERC-1155 tokens (ID 0). Debt tokens are also ERC-1155 (ID 1) but are **soulbound** — they cannot be transferred, only minted by the backend and burned when debt is retired.
 
 ---
 
-## 2. Layer 1 — Smart Contracts
+## 2. System Architecture Diagram
 
-### Files
 ```
-contracts/
-├── CarbonCreditToken.sol    ← ERC-1155 token registry
-└── CarbonMarketplace.sol    ← P2P listing / trading
+┌─────────────────────────────────────────────────────────────────────┐
+│                          USER BROWSER                               │
+│                                                                     │
+│  React + Vite App (port 3000)                                       │
+│  ┌───────────────┐  ┌──────────────┐  ┌──────────────────────────┐ │
+│  │  wagmi/viem   │  │  WebSocket   │  │  REST API calls          │ │
+│  │  (direct RPC) │  │  client      │  │  (award, debt, position) │ │
+│  └───────┬───────┘  └──────┬───────┘  └────────────┬─────────────┘ │
+└──────────┼─────────────────┼──────────────────────-─┼───────────────┘
+           │ JSON-RPC        │ ws://                  │ HTTP
+           │ (MetaMask)      │                        │
+           ▼                 ▼                        ▼
+┌──────────────┐   ┌──────────────────────────────────────────────────┐
+│  Hardhat /   │   │          Backend Node.js (port 4000)             │
+│  Sepolia RPC │   │                                                  │
+│  port 8545   │   │  ┌────────────┐  ┌────────────┐  ┌───────────┐  │
+└──────┬───────┘   │  │ listener.js│  │  signer.js │  │ MongoDB   │  │
+       │           │  │ (WSS RPC)  │  │ (BACKEND_  │  │ (entity   │  │
+       │           │  │ event relay│  │  ROLE key) │  │ profiles) │  │
+       │           │  └─────┬──────┘  └──────┬─────┘  └───────────┘  │
+       │           │        │                │                        │
+       │           └────────┼────────────────┼────────────────────────┘
+       │                    │                │
+       │ eth_call /         │ contract       │ eth_sendRawTransaction
+       │ eth_sendTx         │ events         │ (awardCredits, recordDebt)
+       ▼                    ▼                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                      ETHEREUM CHAIN                                │
+│                                                                    │
+│   ┌──────────────────────────────┐  ┌─────────────────────────┐   │
+│   │   CarbonCreditToken (ERC-1155)│  │   CarbonMarketplace     │   │
+│   │   Token ID 0: CREDIT_TOKEN   │  │   (Ownable +            │   │
+│   │   Token ID 1: DEBT_TOKEN     │  │    ReentrancyGuard)      │   │
+│   │   (soulbound)                │  │                         │   │
+│   └──────────────────────────────┘  └─────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 2a. CarbonCreditToken.sol
+## 3. Technology Stack
 
+### Smart Contracts
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `hardhat` | ^2.28.6 | Compile, test, deploy |
+| `@nomicfoundation/hardhat-toolbox` | ^5.0.0 | All hardhat plugins (ethers, waffle, coverage, etc.) |
+| `@openzeppelin/contracts` | ^5.4.0 | ERC1155, AccessControl, Ownable, ReentrancyGuard |
+| `dotenv` | ^17.3.1 | Load `.env` into hardhat config |
+
+### Backend
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `express` | ^4.19.2 | HTTP REST API |
+| `ws` | ^8.18.0 | WebSocket server |
+| `ethers` | ^6.13.4 | Blockchain interaction (signer + listener) |
+| `mongoose` | ^9.2.1 | MongoDB ODM for business profiles |
+| `dotenv` | ^16.4.5 | Environment variable loading |
+
+### Frontend
+| Package | Purpose |
+|---------|---------|
+| `vite` + `react` | Build tool + UI framework |
+| `wagmi` | React hooks for wallet connection + contract calls |
+| `viem` | Low-level Ethereum client (wagmi dependency + used directly) |
+| `recharts` | Analytics charts (CarbonTrendChart, EmissionBreakdownChart) |
+| `qrcode` | QR code generation for transaction verification |
+| `html5-qrcode` | QR code scanning in the browser |
+
+---
+
+## 4. Layer 1 — Smart Contracts
+
+### 4.1 CarbonCreditToken (ERC-1155)
+
+**File:** `contracts/CarbonCreditToken.sol`  
 **Inherits:** `ERC1155`, `AccessControl`, `ReentrancyGuard`
 
 #### Token IDs
 
-| ID | Name | Description | Transferable? |
-|---|---|---|---|
-| `0` | `CREDIT_TOKEN` | Green energy / carbon offsets | ✅ Free to trade |
-| `1` | `DEBT_TOKEN` | Emission liabilities (soulbound) | ❌ Mint/burn only |
+| ID | Constant | Description | Transferable? |
+|----|----------|-------------|---------------|
+| `0` | `CREDIT_TOKEN` | Carbon offset credits (green energy, reforestation, etc.) | ✅ Yes |
+| `1` | `DEBT_TOKEN` | Emission liabilities assigned by backend | ❌ No (soulbound) |
 
-#### Roles
+#### Key Functions
 
-| Role constant | keccak256 of | Who holds it |
-|---|---|---|
-| `DEFAULT_ADMIN_ROLE` | `(bytes32(0))` | Deployer wallet |
-| `BACKEND_ROLE` | `"BACKEND_ROLE"` | Backend Node.js wallet |
-| `MARKETPLACE_ROLE` | `"MARKETPLACE_ROLE"` | `CarbonMarketplace` contract address |
+| Function | Caller | Description |
+|----------|--------|-------------|
+| `awardCredits(entity, amount, reason)` | `BACKEND_ROLE` | Mints CREDIT_TOKEN (ID 0) to an entity. Emits `CreditsAwarded`. |
+| `recordDebt(entity, amount, reason)` | `BACKEND_ROLE` | Mints DEBT_TOKEN (ID 1) to an entity. Emits `DebtRecorded`. |
+| `clearDebt(entity, amount)` | `BACKEND_ROLE` | Burns DEBT_TOKEN. Used when an entity retires credits to offset debt. Emits `DebtCleared`. |
+| `retireCredits(entity, amount)` | `BACKEND_ROLE` | Burns CREDIT_TOKEN (consumption/retirement). |
+| `settleTransfer(seller, buyer, amount)` | `MARKETPLACE_ROLE` | Internal transfer of CREDIT_TOKEN from seller to buyer. Called exclusively by CarbonMarketplace. |
+| `netCredits(entity)` → `int256` | Anyone (view) | Returns `credits − debt`. Positive = offset holder; Negative = emitter. |
+| `getPosition(entity)` → `(credits, debt)` | Anyone (view) | Returns both raw balances as a tuple. |
 
-#### Public/External Functions
+#### Events
 
-| Function | Caller | Action |
-|---|---|---|
-| `awardCredits(entity, amount, reason)` | `BACKEND_ROLE` | Mints `CREDIT_TOKEN` to entity, emits `CreditsAwarded` |
-| `recordDebt(entity, amount, reason)` | `BACKEND_ROLE` | Mints `DEBT_TOKEN` to entity, emits `DebtRecorded` |
-| `clearDebt(entity, amount)` | `BACKEND_ROLE` | Burns `DEBT_TOKEN` from entity, emits `DebtCleared` |
-| `retireCredits(entity, amount)` | `BACKEND_ROLE` | Burns `CREDIT_TOKEN` when credits are consumed |
-| `settleTransfer(seller, buyer, amount)` | `MARKETPLACE_ROLE` | Moves `CREDIT_TOKEN` between accounts, emits `BalanceUpdated` |
-| `netCredits(entity)` | Anyone (view) | Returns `int256(credits) - int256(debt)` — can be negative |
-| `getPosition(entity)` | Anyone (view) | Returns `(uint256 credits, uint256 debt)` tuple |
-| `balanceOf(entity, id)` | Anyone (view) | Standard ERC-1155 balance read |
+| Event | Emitted by |
+|-------|-----------|
+| `CreditsAwarded(entity, amount, reason)` | `awardCredits` |
+| `DebtRecorded(entity, amount, reason)` | `recordDebt` |
+| `DebtCleared(entity, amount)` | `clearDebt` |
+| `BalanceUpdated(seller, buyer, amount, sellerBal, buyerBal)` | `settleTransfer` |
 
-#### Soulbound Debt — How It Works
+#### Soulbound Enforcement
 
-```solidity
-// CarbonCreditToken.sol — _update() override
-function _update(address from, address to, uint256[] memory ids, ...) internal override {
-    for (uint256 i = 0; i < ids.length; i++) {
-        if (ids[i] == DEBT_TOKEN) {
-            // Only minting (from == 0) and burning (to == 0) allowed
-            require(from == address(0) || to == address(0), "CCT: DEBT_TOKEN is soulbound");
-        }
-    }
-    super._update(from, to, ids, values);
-}
-```
-
-- `from == address(0)` → mint → ✅ allowed
-- `to == address(0)` → burn → ✅ allowed
-- Any real transfer → ❌ reverted
-
-#### Events Emitted
-
-| Event | When |
-|---|---|
-| `CreditsAwarded(entity, amount, reason)` | `awardCredits()` called |
-| `DebtRecorded(entity, amount, reason)` | `recordDebt()` called |
-| `DebtCleared(entity, amount)` | `clearDebt()` called |
-| `BalanceUpdated(seller, buyer, amount, sBal, bBal)` | `settleTransfer()` called |
+The `_update()` hook is overridden. For any transfer involving `DEBT_TOKEN` (ID 1), it **reverts** unless either `from == address(0)` (mint) or `to == address(0)` (burn). This makes debt tokens non-transferable at the protocol level.
 
 ---
 
-### 2b. CarbonMarketplace.sol
+### 4.2 CarbonMarketplace
 
+**File:** `contracts/CarbonMarketplace.sol`  
 **Inherits:** `Ownable`, `ReentrancyGuard`
 
-#### Listing State Machine
+#### Listing Lifecycle
 
 ```
-listCredits() ──► status: Open
-                      │
-          ┌───────────┴───────────┐
-          ▼                       ▼
- purchaseListing()          cancelListing()
-  status: Fulfilled          status: Cancelled
+listCredits() → status: Open
+     │
+     ├── purchaseListing() → status: Fulfilled   (buyer pays ETH, gets credits)
+     └── cancelListing()   → status: Cancelled   (seller pulls listing)
 ```
 
 #### Listing Struct
@@ -148,649 +203,697 @@ listCredits() ──► status: Open
 struct Listing {
     uint256       id;
     address       seller;
-    uint256       amount;          // CREDIT_TOKEN units
-    uint256       pricePerCredit;  // price in wei per 1 credit
-    ListingStatus status;          // Open | Fulfilled | Cancelled
+    uint256       amount;           // CREDIT_TOKEN units
+    uint256       pricePerCredit;   // wei per single credit
+    ListingStatus status;           // Open | Fulfilled | Cancelled
 }
 ```
 
-#### Why There Is No ERC-1155 `setApprovalForAll()`
+#### Key Functions
 
-Normally to move someone's tokens you'd call `setApprovalForAll()`. Instead, the Marketplace holds `MARKETPLACE_ROLE` and calls `creditToken.settleTransfer(seller, buyer, amount)` directly. This:
-- Eliminates the open-ended approval risk
-- Ensures credits can only move after the Marketplace's own checks pass
+| Function | Description |
+|----------|-------------|
+| `listCredits(amount, pricePerCredit)` | Creates a listing. Validates that seller's **net position** (credits − debt) ≥ amount. This prevents a net emitter from selling credits they haven't offset yet. |
+| `cancelListing(listingId)` | Only the original seller can cancel. |
+| `purchaseListing(listingId)` | Payable. Buyer sends exact ETH = `amount × pricePerCredit`. Uses CEI pattern: marks fulfilled → forwards ETH to seller → calls `settleTransfer`. |
+| `getListing(id)` | View: single listing by ID. |
+| `getListings(from, to)` | View: paginated listing array. |
 
-#### Net Position Gate (Listing Rule)
+#### Security Properties
 
-```solidity
-// CarbonMarketplace.sol — listCredits()
-int256 netPos = creditToken.netCredits(msg.sender);
-require(netPos >= int256(amount), "Marketplace: net credit position too low to list");
-```
-
-**Example:**
-
-| Credits | Debt | Net | Can list 100? |
-|---|---|---|---|
-| 1000 | 0 | +1000 | ✅ |
-| 1000 | 500 | +500 | ✅ |
-| 1000 | 1000 | 0 | ❌ |
-| 1000 | 2000 | -1000 | ❌ |
-
-#### purchaseListing() — CEI Pattern
-
-```
-1. Checks:   listing is Open, msg.value == amount × price, not self-buy
-2. Re-check: seller still has enough CREDIT_TOKEN (prevents stale listings)
-3. Effects:  listing.status = Fulfilled
-4. Interactions:
-   a. ETH → seller via low-level call
-   b. creditToken.settleTransfer(seller, buyer, amount)
-   c. emit TradeExecuted
-```
-
-The state change happens **before** external calls — this is the CEI (Checks-Effects-Interactions) pattern, preventing reentrancy.
+- **No ETH custody**: ETH is forwarded immediately to the seller via `call{value}`. The contract never holds ETH.
+- **CEI pattern**: State change (`status = Fulfilled`) happens before any external call (ETH transfer, `settleTransfer`).
+- **Stale listing protection**: Seller's credit balance is re-validated at purchase time, not just at listing time.
+- **No `setApprovalForAll`**: The marketplace holds `MARKETPLACE_ROLE` and calls `settleTransfer` directly — much safer than an open ERC-1155 approval.
+- **ReentrancyGuard**: All state-mutating functions are protected.
 
 ---
 
-### 2c. Contract Deployment
-
-**Script:** `scripts/getAddresses.js` (used by `start.ps1`) and `scripts/deploy.js` (manual use).
-
-Deployment order (critical — the Marketplace needs the Token address):
+### 4.3 Access Control & Roles
 
 ```
-1. Deploy CarbonCreditToken(admin, metaURI)
-2. Deploy CarbonMarketplace(tokenAddress, admin)
-3. creditToken.grantRole(MARKETPLACE_ROLE, marketplace.address)
-4. creditToken.grantRole(BACKEND_ROLE, backendWalletAddress)
+DEFAULT_ADMIN_ROLE   ← deployer address (can grant/revoke all roles)
+    │
+    ├── BACKEND_ROLE ← backend server wallet (Account #0 on Hardhat local)
+    │                   can: awardCredits, recordDebt, clearDebt, retireCredits
+    │
+    └── MARKETPLACE_ROLE ← CarbonMarketplace contract address
+                            can: settleTransfer
 ```
 
-Addresses are written to `addresses.json` and then synced into `.env` files by `start.ps1`.
+These roles are granted during deployment in `scripts/getAddresses.js`:
+1. Deploy `CarbonCreditToken` (deployer = admin).
+2. Deploy `CarbonMarketplace`.
+3. Grant `MARKETPLACE_ROLE` to the marketplace contract address.
+4. Grant `BACKEND_ROLE` to the deployer address (which is also the backend signer key on local).
 
 ---
 
-## 3. Layer 2 — Backend (Node.js)
+### 4.4 Key Design Decisions
 
-### Files
-```
-backend/
-├── index.js      ← Express HTTP server + WebSocket broadcaster
-├── listener.js   ← Contract event subscriptions
-├── signer.js     ← BACKEND_ROLE wallet + write functions
-├── .env          ← Private key + contract addresses (never committed)
-└── .env.example  ← Template showing required keys
-```
+| Decision | Rationale |
+|----------|-----------|
+| **ERC-1155** instead of two separate ERC-20s | One contract handles both credit and debt tokens. Future token IDs can represent vintage-specific credits (e.g., ID 2 = 2024 Solar). |
+| **Debt tokens are soulbound** | An entity cannot transfer its emission liability — it must offset it. |
+| **Net-position gate on listings** | Prevents market manipulation: a heavy emitter cannot dump credits while still owing debt. |
+| **Backend is trusted off-chain oracle** | Credit emission calculations are complex (physical world data). The backend processes activity inputs and calls `awardCredits`/`recordDebt` on-chain using its `BACKEND_ROLE` key. |
 
 ---
 
-### 3a. signer.js — The Privileged Wallet
+## 5. Layer 2 — Backend Server
 
-```javascript
-// backend/signer.js
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL)
-const wallet   = new ethers.Wallet(process.env.BACKEND_PRIVATE_KEY, provider)
+### 5.1 `index.js` — HTTP + WebSocket Server
+
+**Port:** 4000  
+**Framework:** Express + Node.js `http` + `ws`
+
+The server does three things concurrently:
+
+1. **HTTP REST API** — Receives minting requests (award, debt, clear-debt) and serves read endpoints.
+2. **WebSocket server** — Maintains an in-memory `Set` of connected browser clients and broadcasts blockchain events to all of them.
+3. **Blockchain listener** — Delegates to `listener.js` to subscribe to contract events via a persistent WebSocket RPC connection.
+
+**CORS:** Wildcard (`*`) is applied for local development.
+
+**MongoDB:** Connected via `mongoose` for entity profiles (business name ↔ wallet address mapping). Connection string from `MONGO_URI` env var.
+
+---
+
+### 5.2 `signer.js` — Backend Wallet
+
+The privileged backend wallet that holds `BACKEND_ROLE`. It constructs:
+
+```js
+const provider = new ethers.JsonRpcProvider(RPC_URL)  // HTTP JSON-RPC
+const wallet   = new ethers.Wallet(BACKEND_PRIVATE_KEY, provider)
 const creditToken = new ethers.Contract(TOKEN_ADDRESS, ABI, wallet)
 ```
 
-This wallet is the only one with `BACKEND_ROLE`. It signs and broadcasts transactions for:
+Exported functions (called by REST API handlers in `index.js`):
 
-| Exported function | Contract call | Used by |
-|---|---|---|
-| `awardCredits(entity, amount, reason)` | `creditToken.awardCredits()` | `POST /award` |
-| `recordDebt(entity, amount, reason)` | `creditToken.recordDebt()` | `POST /debt` |
-| `clearDebt(entity, amount)` | `creditToken.clearDebt()` | `POST /clear-debt` |
+| Function | On-chain call |
+|----------|--------------|
+| `awardCredits(entity, amount, reason)` | `creditToken.awardCredits(...)` |
+| `recordDebt(entity, amount, reason)` | `creditToken.recordDebt(...)` |
+| `clearDebt(entity, amount)` | `creditToken.clearDebt(...)` |
 
-The private key never leaves the backend server. The frontend never has access to it.
-
----
-
-### 3b. listener.js — Watching the Chain
-
-```javascript
-// backend/listener.js
-const provider = new ethers.WebSocketProvider(process.env.RPC_URL) // ws://
-tokenContract.on("CreditsAwarded", (entity, amount, reason, event) => {
-    onEvent({ type: "CreditsAwarded", entity, amount: amount.toString(), ... })
-})
-```
-
-`ethers.WebSocketProvider` opens a persistent WebSocket to the Hardhat/Ethereum node. When the node mines a block containing a matching event log, ethers.js decodes it and fires the callback instantly. The `onEvent` function is `broadcast()` from `index.js`.
-
-**All events listened to:**
-
-| Contract | Event |
-|---|---|
-| CarbonCreditToken | `CreditsAwarded`, `DebtRecorded`, `DebtCleared`, `BalanceUpdated` |
-| CarbonMarketplace | `ListingCreated`, `ListingCancelled`, `TradeExecuted` |
+On local Hardhat, `BACKEND_PRIVATE_KEY` is Account #0's key:  
+`0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
 
 ---
 
-### 3c. index.js — HTTP + WebSocket Server
+### 5.3 `listener.js` — Blockchain Event Relay
 
-Both the REST API and the WebSocket server share a single `http.Server` on port 4000.
+Uses **ethers.js `WebSocketProvider`** (not HTTP) for persistent real-time subscriptions.
 
-```javascript
-const app    = express()
-const server = http.createServer(app)
-const wss    = new WebSocketServer({ server })   // ws:// shares same port as http://
-server.listen(4000)
+Subscribes to events from both contracts:
+
+**CarbonCreditToken events:**
+- `CreditsAwarded` → `{ type, entity, amount, reason, txHash }`
+- `DebtRecorded` → `{ type, entity, amount, reason, txHash }`
+- `DebtCleared` → `{ type, entity, amount, txHash }`
+- `BalanceUpdated` → `{ type, seller, buyer, amount, sellerBalance, buyerBalance, txHash }`
+
+**CarbonMarketplace events:**
+- `ListingCreated` → `{ type, id, seller, amount, pricePerCredit, txHash }`
+- `ListingCancelled` → `{ type, id, seller, txHash }`
+- `TradeExecuted` → `{ type, id, seller, buyer, amount, totalPrice, txHash }`
+
+When any event fires, the raw WebSocket error handler is patched to prevent Node.js crashing on unexpected websocket disconnects. Each event is forwarded via the `broadcast()` callback to all connected frontend WebSocket clients.
+
+---
+
+### 5.4 MongoDB / EntityProfile
+
+**Model:** `backend/src/models/EntityProfile.js`
+
+```js
+{
+  accountId:    String,  // hashed wallet address (unique, indexed)
+  businessName: String,  // 2–100 chars
+  createdAt:    Date,
+  updatedAt:    Date,
+}
 ```
 
-#### REST API Endpoints
+The `accountId` is a **hash of the wallet address** (not the raw address), stored via `utils/hashAccountId.js` in the frontend. This means the backend never stores raw wallet addresses, preserving privacy.
 
-| Method | Path | Body | Returns |
-|---|---|---|---|
+**Routes:** `backend/src/routes/entityProfile.routes.js`  
+Mounted at `/entity` in `index.js`.
+
+| Method | Endpoint | Action |
+|--------|----------|--------|
+| `GET` | `/entity/profile/:accountId` | Fetch business name for a hashed account ID |
+| `POST` | `/entity/profile` | Create or update a business profile |
+
+---
+
+### 5.5 REST API Reference
+
+| Method | Endpoint | Body | Returns |
+|--------|----------|------|---------|
 | `GET` | `/health` | — | `{ status: "ok" }` |
-| `GET` | `/position/:address` | — | `{ credits, debt, netCredits }` |
-| `POST` | `/award` | `{ entity, amount, reason }` | `{ success, txHash }` |
+| `GET` | `/position/:address` | — | `{ address, credits, debt, netCredits }` |
+| `POST` | `/award` | `{ entity, amount, reason, signature? }` | `{ success, txHash }` |
 | `POST` | `/debt` | `{ entity, amount, reason }` | `{ success, txHash }` |
 | `POST` | `/clear-debt` | `{ entity, amount }` | `{ success, txHash }` |
+| `GET` | `/entity/profile/:accountId` | — | `{ accountId, businessName }` |
+| `POST` | `/entity/profile` | `{ accountId, businessName }` | Profile object |
 
-#### WebSocket Broadcast
-
-```javascript
-function broadcast(eventData) {
-    const payload = JSON.stringify(eventData)
-    for (const client of clients) {
-        if (client.readyState === 1 /* OPEN */) client.send(payload)
-    }
-}
-```
-
-Every time a contract event fires in `listener.js`, `broadcast()` pushes the JSON object to every connected browser client.
+**Optional signature on `/award`:**  
+If `signature` is provided, the backend verifies it with `ethers.verifyMessage` over message string `"award:<amount>:<reason>"`. The recovered address must match `entity`. This prevents arbitrary award calls without entity consent (backward-compatible — omitting `signature` still works).
 
 ---
 
-## 4. Layer 3 — Frontend (React + Vite)
+## 6. Layer 3 — Frontend
 
-### Files
-```
-frontend/src/
-├── main.jsx                   ← App entry: renders <App> with Wagmi + QueryClient providers
-├── App.jsx                    ← Full dashboard component
-├── App.css                    ← Dark theme, vanilla CSS
-├── hooks/
-│   ├── useEntityPosition.js   ← Reads credits + debt from chain
-│   ├── useMarketplace.js      ← Reads listings, writes list/buy/cancel txns
-│   └── useLiveFeed.js         ← WebSocket connection for live events
-└── lib/
-    ├── contracts.js           ← ABIs + contract addresses (from VITE_ env vars)
-    └── wagmiConfig.js         ← Chain + connector configuration
-```
+**Build tool:** Vite  
+**Port:** 3000  
+**Entry point:** `src/main.jsx` → wraps app in `WagmiProvider` + `QueryClientProvider`
 
----
+### 6.1 App Entry Point & Routing
 
-### 4a. Application Bootstrap (main.jsx)
+`App.jsx` is a **single-page app with view-state routing** (no React Router). Navigation is handled by a `currentView` state that renders one of:
 
-```jsx
-// src/main.jsx
-createRoot(document.getElementById('root')).render(
-  <WagmiProvider config={wagmiConfig}>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </WagmiProvider>
-)
-```
+| View | Component |
+|------|-----------|
+| `'marketplace'` | Inline JSX in App.jsx — main marketplace grid |
+| `'history'` | `<UserTransactions />` |
+| `'analytics'` | `<BusinessAnalytics />` |
+| `'verify'` | `<VerifyTransaction />` |
+| `'purchase-success'` | `<PurchaseSuccess txHash />` |
 
-- `WagmiProvider` — injects the wagmi React context (chain state, wallet state, contract reads/writes)
-- `QueryClientProvider` — `@tanstack/react-query` handles caching + refetching of on-chain data
-
-Because this is a plain Vite SPA (no SSR), there are **no hydration issues** and **no `"use client"` directives** needed.
+There is also a separate static page at `/public-dashboard.html` (no wallet required) for public carbon data.
 
 ---
 
-### 4b. wagmiConfig.js — Chain + Connector Setup
+### 6.2 Wallet Connection (wagmi + viem)
 
-```javascript
-// src/lib/wagmiConfig.js
-export const wagmiConfig = createConfig({
-  chains: [hardhat, sepolia],
-  connectors: [injected()],    // MetaMask, Rabby, Coinbase Wallet
-  transports: {
-    [hardhat.id]: http('http://127.0.0.1:8545'),  // local Hardhat
-    [sepolia.id]: http(),                          // public RPC
-  },
-})
-```
+**Config file:** `src/lib/wagmiConfig.js`
 
-`injected()` detects any browser extension wallet (MetaMask is the most common). `hardhat.id` is `31337`.
+Supported chains:
+- `hardhat` (chainId 31337) — `http://127.0.0.1:8545`
+- `sepolia` (chainId 11155111) — public RPC
+
+Connector: `injected()` — supports MetaMask, Rabby, Coinbase Wallet, or any browser wallet.
+
+The app detects if the connected chain is wrong (not Hardhat during local dev) and shows a "Switch to Hardhat" button.
 
 ---
 
-### 4c. contracts.js — ABIs and Addresses
+### 6.3 Contract Addresses & ABIs
 
-```javascript
-// src/lib/contracts.js
-export const CONTRACT_ADDRESSES = {
-  carbonCreditToken: import.meta.env.VITE_CARBON_CREDIT_TOKEN_ADDRESS ?? '0x0',
-  marketplace:       import.meta.env.VITE_MARKETPLACE_ADDRESS ?? '0x0',
-}
-```
+**File:** `src/lib/contracts.js`
 
-`import.meta.env.VITE_*` is the Vite equivalent of `process.env.NEXT_PUBLIC_*`. Vite injects these at **build time** from `frontend/.env`. The values are baked into the JS bundle.
-
-The ABIs are JSON ABI arrays (not Solidity-style string notation) because they support named tuple return components, which the old TypeScript `parseAbi()` didn't handle well for `getListings()`.
+- Addresses are loaded from Vite env vars:
+  - `VITE_CARBON_CREDIT_TOKEN_ADDRESS`
+  - `VITE_MARKETPLACE_ADDRESS`
+- ABIs are inlined as JSON arrays (no JSON file imports needed).
+- Exports `CREDIT_TOKEN_ID = 0n`, `DEBT_TOKEN_ID = 1n`, and `ListingStatus` enum mirror.
 
 ---
 
-### 4d. useEntityPosition.js — Reading Balances
+### 6.4 React Hooks
 
-```javascript
-// src/hooks/useEntityPosition.js
-const { data } = useReadContracts({
-  contracts: [
-    { address, abi, functionName: 'balanceOf', args: [userAddress, 0n] },  // CREDIT_TOKEN
-    { address, abi, functionName: 'balanceOf', args: [userAddress, 1n] },  // DEBT_TOKEN
-  ],
-  query: { enabled: !!userAddress },
-})
+All contract interactions are wrapped in custom hooks in `src/hooks/`:
 
-const credits    = data?.[0]?.result ?? 0n
-const debt       = data?.[1]?.result ?? 0n
-const netCredits = BigInt(credits) - BigInt(debt)
-```
-
-**What happens under the hood:**
-1. wagmi batches both calls into a single `eth_call` (multicall under the hood)
-2. The node executes both `balanceOf()` calls — view functions, zero gas
-3. Raw bytes returned are decoded by viem using the ABI `uint256` output type
-4. Result lands as a `bigint` — no floating point precision issues
+| Hook | Description |
+|------|-------------|
+| `useEntityPosition()` | Reads `getPosition(address)` from CarbonCreditToken via wagmi `useReadContract`. Returns `{ credits, debt, netCredits, isLoading, refetch }`. |
+| `useActiveListings()` | Reads `nextListingId` then `getListings(0, n)`, filters to `Open` status only. Returns `{ listings, isLoading, refetch }`. |
+| `useListCredits()` | Wraps `writeContract` for `listCredits(amount, pricePerCredit)`. Converts ETH string → wei via `parseEther`. |
+| `usePurchaseListing()` | Wraps `writeContractAsync` for `purchaseListing(listingId)` with `value: totalWei`. Returns the tx hash on success. |
+| `useCancelListing()` | Wraps `writeContract` for `cancelListing(listingId)`. |
+| `useLiveFeed()` | Opens a WebSocket to `VITE_BACKEND_WS_URL`. Appends incoming events to a state array. Returns `{ events, connected }`. |
+| `useCarbonAward()` | Called after carbon calculator form submission. Sends `POST /award` (for reductions → mint credits) and `POST /debt` (for emissions → mint debt). Returns `{ isSubmitting, result, error, submitActivity, reset }`. |
+| `useEntityProfile()` | Hashes the wallet address (`hashAccountId`), fetches profile from `GET /entity/profile/:accountId`. Detects if onboarding is needed (no businessName). Exposes `createProfile()` for `POST /entity/profile`. |
+| `usePublicCarbonData()` | Used by the public dashboard. Reads all blockchain events via `blockchainReader.js` (no wallet needed). |
+| `useUserTransactions()` | Reads all on-chain history for the connected wallet from event logs. |
+| `useTxVerification()` | Verifies a transaction by hash — decodes which contract function was called and validates the event logs. |
+| `useCarbonAnalytics()` | Aggregates credit/debt events for the business analytics dashboard. |
 
 ---
 
-### 4e. useMarketplace.js — Reading Listings
+### 6.5 Pages
 
-```javascript
-// src/hooks/useMarketplace.js
-export function useActiveListings() {
-  const { data: nextId } = useReadContract({ functionName: 'nextListingId' })
-  const total = Number(nextId ?? 0n)
-
-  const { data: listings } = useReadContract({
-    functionName: 'getListings',
-    args: [0n, BigInt(total)],
-    query: { enabled: total > 0 },
-  })
-
-  const open = (listings ?? []).filter(l => Number(l.status) === ListingStatus.Open)
-  return { listings: open }
-}
-```
-
-Two reads are chained: first get `nextListingId` (scalar), then fetch `getListings(0, total)` (array of tuples). The `enabled: total > 0` guard prevents calling `getListings(0, 0)` which would revert with `"invalid range"`.
+| Page | File | Description |
+|------|------|-------------|
+| **UserTransactions** | `pages/UserTransactions.jsx` | Shows all historical transactions for the connected wallet. Uses `useUserTransactions`. Displays a `UserTransactionTable` with sorting. |
+| **BusinessAnalytics** | `pages/BusinessAnalytics.jsx` | CarbonTrendChart + EmissionBreakdownChart + NetZeroGauge for the connected entity's historical performance. |
+| **PurchaseSuccess** | `pages/PurchaseSuccess.jsx` | Displayed after a successful credit purchase. Shows the tx hash and generates a QR code (`TransactionQR`) that can be scanned to verify offset retirement. |
+| **VerifyTransaction** | `pages/VerifyTransaction.jsx` | Accepts a tx hash (typed or QR scanned via `QRScanner`) and performs trustless on-chain verification via `useTxVerification`. |
+| **PublicDashboard** | `pages/PublicDashboard.jsx` | No-wallet dashboard. Shows `GlobalStats`, `FirmTable`, and `CarbonImpactDashboard` for all registered firms. Loaded at `/public-dashboard.html`. |
 
 ---
 
-### 4f. useMarketplace.js — Writing Transactions
+### 6.6 Components
 
-```javascript
-// src/hooks/useMarketplace.js
-export function useListCredits() {
-  const { writeContract, isPending } = useWriteContract()
-
-  function listCredits(amount, pricePerCreditEth) {
-    writeContract({
-      address: CONTRACT_ADDRESSES.marketplace,
-      abi: CARBON_MARKETPLACE_ABI,
-      functionName: 'listCredits',
-      args: [amount, parseEther(pricePerCreditEth)],
-    })
-  }
-  return { listCredits, isPending }
-}
-```
-
-**Exact sequence when `listCredits()` is called:**
-1. wagmi encodes the call data: `listCredits(uint256,uint256)` selector + ABI-encoded args
-2. MetaMask popup opens showing: function called, args, estimated gas fee
-3. User clicks **Confirm** — MetaMask signs the tx with the user's private key locally
-4. Signed tx is broadcast via `eth_sendRawTransaction` to the Hardhat node
-5. Hardhat mines the block, `CarbonMarketplace.listCredits()` executes on-chain
-6. `ListingCreated` event emitted — picked up by backend listener → broadcast to frontend WS
-7. `useWaitForTransactionReceipt({ hash })` resolves → `isSuccess` becomes `true`
-8. `setTimeout(() => refetchListings(), 3000)` triggers a re-read of listings
+| Component | Description |
+|-----------|-------------|
+| `BusinessOnboardingModal` | Modal shown when a wallet connects for the first time (no profile found). Prompts for a business name, calls `createProfile()`. |
+| `CarbonImpactDashboard` | Aggregated credit/debt view for a single firm. |
+| `CarbonTrendChart` | Recharts line chart showing credit vs. debt trend over time. |
+| `EmissionBreakdownChart` | Recharts pie/bar chart showing breakdown of emission sources. |
+| `FirmTable` | Table of all participating firms with their net positions. Fetched trustlessly from on-chain event logs. |
+| `GlobalStats` | Summary cards: total credits issued, total debt issued, active credits, active debt, firm count, etc. |
+| `NetZeroGauge` | Visual gauge showing how close an entity is to net-zero. |
+| `QRScanner` | Wraps `html5-qrcode` library for camera-based QR scanning in the Verify page. |
+| `TransactionQR` | Generates a QR code (`qrcode` lib) embedding a tx hash, for offline/physical verification proof. |
+| `UserTransactionTable` | Richly formatted table for the UserTransactions page. |
 
 ---
 
-### 4g. useLiveFeed.js — Real-Time Events
+### 6.7 Utility Libraries
 
-```javascript
-// src/hooks/useLiveFeed.js
-useEffect(() => {
-  const ws = new WebSocket(import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:4000')
-  ws.onopen    = () => setConnected(true)
-  ws.onclose   = () => setConnected(false)
-  ws.onmessage = (msg) => {
-    const data = JSON.parse(msg.data)
-    if (data.type === 'connected') return   // skip handshake ping
-    setEvents(prev => [data, ...prev].slice(0, 50))
-  }
-  return () => ws.close()   // cleanup when component unmounts
-}, [])
-```
-
-The WebSocket connection is opened once when `App.jsx` mounts and stays open for the entire session. Each event pushed from the backend is prepended to the list (`[data, ...prev]`), keeping the feed newest-first.
+| File | Description |
+|------|-------------|
+| `utils/blockchainReader.js` | **Read-only, trustless chain reader** using `viem`. Functions: `getAllParticipatingAddresses`, `getFirmBalance`, `getRecentTransfers`, `computeGlobalStats`. Fetches event logs in 2000-block chunks with exponential-backoff retry. No signer, no writes, no backend needed. |
+| `utils/transactionParser.js` | Decodes raw transaction data (input calldata + logs) into human-readable descriptions for the Verify page. |
+| `utils/carbonAnalyticsEngine.js` | Processes raw event logs into time-series analytics (credit earned per week, debt per week, etc.) for the analytics charts. |
+| `utils/hashAccountId.js` | Hashes a wallet address to a `accountId` string, preserving privacy when storing business names in MongoDB. |
+| `utils/qrGenerator.js` | Thin wrapper around the `qrcode` npm package to generate a base64 data URL from a string. |
 
 ---
 
-## 5. Workflow Walkthroughs
+### 6.8 Carbon Calculator
 
-### A. Awarding Credits via REST API
+**File:** `src/lib/carbonCalculator.js`
+
+Converts real-world activity inputs into credit/debt amounts before submitting to the backend.
+
+#### Emission Factors
+
+| Input | Factor |
+|-------|--------|
+| Grid energy consumed (kWh) | × 0.82 kg CO₂/kWh |
+| Direct CO₂ emitted (kg) | × 1.00 |
+| Vehicle distance (km) | × 0.21 kg CO₂/km |
+
+#### Reduction Factors
+
+| Input | Factor |
+|-------|--------|
+| Waste recycled (kg) | × 0.5 credits/kg |
+| Trees planted | × 20 credits/tree |
+| Clean energy generated (kWh) | × 0.82 credits/kWh |
+
+#### Formula
 
 ```
-curl/PowerShell                  index.js (backend)               Hardhat node
-─────────────────────────────────────────────────────────────────────────────────
-POST /award
-{ entity, amount, reason }
-         │
-         ▼
-  app.post("/award")
-    validates body
-         │
-         ▼
-  signer.awardCredits(entity, amount, reason)
-    creditToken.awardCredits()   ← ethers.js encodes + signs
-         │
-         ▼
-  eth_sendRawTransaction ──────────────────────────────────────────►
-                                                            mines block
-                                                            CreditsAwarded event
-                                                                    │
-                                 listener.js catches "CreditsAwarded"
-                                 calls broadcast({ type, entity, amount })
-                                                                    │
-                                 WebSocket sends JSON to all clients │
-                                                                    │
-                                 useLiveFeed receives → setEvents() │
-                                                            UI updates live feed
-  ◄── { success: true, txHash }
+emissions  = energyKwh×0.82 + carbonEmittedKg×1 + vehicleKm×0.21
+reductions = recycleKg×0.5  + treesPlanted×20  + cleanEnergyKwh×0.82
+net        = reductions − emissions
+
+→ Credits minted  = Math.floor(reductions)   (always ≥ 0)
+→ Debt minted     = Math.floor(emissions)    (always ≥ 0)
+```
+
+Both credits and debt are submitted independently — an activity report results in up to **two blockchain transactions**: one mint of CREDIT_TOKEN and one mint of DEBT_TOKEN.
+
+---
+
+## 7. Data Flow Walkthroughs
+
+### 7.1 Earning Credits (Activity Submission)
+
+```
+1. User fills carbon calculator form in App.jsx
+2. calcResult = calculateCredits(inputs)         ← pure JS, no blockchain
+3. User clicks "Submit Activity"
+4. useCarbonAward.submitActivity(address, emissions, reductions):
+   a. POST /award  { entity: address, amount: Math.floor(reductions), reason }
+      → backend signer calls creditToken.awardCredits(entity, amount, reason)
+      → CarbonCreditToken mints CREDIT_TOKEN (ID 0) to entity
+      → emits CreditsAwarded event
+   b. POST /debt   { entity: address, amount: Math.floor(emissions), reason }
+      → backend signer calls creditToken.recordDebt(entity, amount, reason)
+      → CarbonCreditToken mints DEBT_TOKEN (ID 1) to entity
+      → emits DebtRecorded event
+5. listener.js picks up both events via WebSocket subscription
+6. broadcast() pushes { type: "CreditsAwarded", ... } and { type: "DebtRecorded", ... }
+   to all connected frontend WebSocket clients
+7. useLiveFeed() receives events and appends to `events` array → Live Feed panel updates
+8. App.jsx calls refetchPos() after 3 seconds → reads updated on-chain balance
 ```
 
 ---
 
-### B. Listing Credits for Sale
+### 7.2 Listing Credits for Sale
 
 ```
-User (MetaMask)      App.jsx          useListCredits()       CarbonMarketplace.sol
-──────────────────────────────────────────────────────────────────────────────────
-[types 100 credits]
-[types 0.01 ETH]
-[clicks "List Credits"]
-         │
-         ▼
-  handleList(e)
-    e.preventDefault()
-    listCredits(100n, "0.01")
-         │
-         ▼
-                           writeContract({
-                             fn: "listCredits",
-                             args: [100n, parseEther("0.01")]
-                           })
-                                  │
-                                  ▼
-                           MetaMask popup:
-                           "Confirm listCredits(100, 10000000000000000)"
-         │
-[confirms tx]──────────────────────────────────────────────────────────────►
-                                                              Checks:
-                                                              - amount > 0 ✓
-                                                              - netPos >= 100 ✓
-                                                              Creates listing:
-                                                              listings[0] = {
-                                                                id: 0,
-                                                                seller: user,
-                                                                amount: 100,
-                                                                price: 0.01 ETH,
-                                                                status: Open
-                                                              }
-                                                              emit ListingCreated
-         │
-  setTimeout(refetchListings, 3000)
-  App re-reads listings → "100 credits @ 0.01 ETH" appears in UI
+1. Seller inputs amount + pricePerCredit (ETH) in "List Credits for Sale" panel
+2. Frontend validates: netCredits >= amount (prevents net emitters from selling)
+3. useListCredits.listCredits(amountBig, priceEthString)
+   → writeContract({ functionName: 'listCredits', args: [amount, parseEther(price)] })
+   → MetaMask prompts user to sign
+   → CarbonMarketplace.listCredits() executes on-chain:
+     a. Validates seller's net position >= amount (on-chain re-check)
+     b. Creates Listing struct with status: Open
+     c. Emits ListingCreated event
+4. listener.js picks up ListingCreated → broadcast → Live Feed updates
+5. refetchListings() called after 3 seconds → Active Listings panel refreshes
 ```
 
 ---
 
-### C. Buying Credits
+### 7.3 Buying Credits from the Marketplace
 
 ```
-Buyer (MetaMask)    App.jsx         usePurchaseListing()    CarbonMarketplace.sol
-──────────────────────────────────────────────────────────────────────────────────
-[clicks "Buy · 1 ETH"]
-         │
-  handleBuy(listingId=0, amount=100n, price=10000000000000000n)
-         │
-         ▼
-                       purchase(0n, 100n * 10000000000000000n)
-                              │   = 1000000000000000000 wei = 1 ETH
-                              ▼
-                       writeContract({
-                         fn: "purchaseListing",
-                         args: [0n],
-                         value: 1_000_000_000_000_000_000n  ← ETH sent
-                       })
-                                    │
-                             MetaMask shows:
-                             "Send 1 ETH to Marketplace"
-         │
-[confirms]──────────────────────────────────────────────────────────────────►
-                                                             Checks:
-                                                             - listing[0] is Open ✓
-                                                             - buyer != seller ✓
-                                                             - msg.value == 1 ETH ✓
-                                                             - seller still has 100 credits ✓
-                                                             CEI:
-                                                             listing.status = Fulfilled
-                                                             seller.call{value: 1 ETH}()
-                                                             creditToken.settleTransfer(
-                                                               seller, buyer, 100)
-                                                             emit TradeExecuted
-         │
-  credit balances updated on-chain
-  useLiveFeed receives "TradeExecuted" event → appears in live feed
-  setTimeout(refetchListings + refetchPos, 3000) → UI updates
+1. Buyer clicks "Buy" on a listing in the Active Listings panel
+2. handleBuy(listingId, amount, pricePerCredit)
+3. usePurchaseListing.purchase(listingId, amount * pricePerCredit)
+   → writeContractAsync({ functionName: 'purchaseListing', value: totalWei })
+   → MetaMask prompts user to send ETH + sign
+   → CarbonMarketplace.purchaseListing() executes:
+     a. Validates listing is Open
+     b. Validates msg.value == amount × pricePerCredit (exact ETH)
+     c. Re-validates seller's CREDIT_TOKEN balance (anti-stale check)
+     d. Marks listing as Fulfilled (CEI pattern)
+     e. Transfers ETH to seller via call{value}
+     f. Calls creditToken.settleTransfer(seller, buyer, amount)
+        → CarbonCreditToken moves CREDIT_TOKEN from seller to buyer
+        → Emits BalanceUpdated
+     g. Emits TradeExecuted
+4. writeContractAsync returns txHash
+5. App.jsx sets lastTxHash = txHash and currentView = 'purchase-success'
+6. PurchaseSuccess page renders TransactionQR(txHash) → QR code for offline proof
+7. listener.js picks up TradeExecuted + BalanceUpdated → broadcast → Live Feed
+8. Both parties' positions update on-chain
 ```
 
 ---
 
-### D. Event Propagation (Live Feed)
+### 7.4 Real-Time Event Feed
 
 ```
-Hardhat node         listener.js             WebSocket            useLiveFeed.js
-─────────────────────────────────────────────────────────────────────────────────
-Block mined
-event log present
-"DebtRecorded"
-  entity: 0x709...
-  amount: 2000
-         │
-         ▼
-tokenContract.on("DebtRecorded",
-  callback(entity, amount, reason, event) {
-    onEvent({
-      type: "DebtRecorded",
-      entity: "0x709...",
-      amount: "2000",
-      reason: "Industrial Pollution",
-      txHash: event.log.transactionHash
-    })
-  }
-)
-         │
-         ▼
-broadcast({ type: "DebtRecorded", ... })
-  iterates clients Set
-  client.send(JSON.stringify(payload))
-         │
-         ► ws.onmessage fires in browser
-           const data = JSON.parse(msg.data)
-           setEvents(prev => [data, ...prev].slice(0, 50))
-           React re-renders live feed panel
-           "<DebtRecorded · {type, entity, amount...}>"  appears at top
+Backend startup:
+  server.listen() → startListeners(broadcast)
+  listener.js creates WebSocketProvider (wss://RPC_URL)
+  Attaches ethers contract event listeners for all 7 event types
+
+Browser connection:
+  useLiveFeed() creates WebSocket to ws://localhost:4000
+  Sends initial { type: "connected" } message on open
+
+On any on-chain event:
+  ethers event fires in listener.js
+  → formatted event object constructed
+  → broadcast(eventData)
+  → JSON.stringify(eventData) sent to all `clients` Set
+  → useLiveFeed receives via ws.onmessage
+  → events state updated → Live Feed panel re-renders
 ```
 
 ---
 
-## 6. How to Make Your Own Changes
+### 7.5 Business Onboarding
 
-### Add a new REST API endpoint
-
-**Step 1** — Add the business logic in `backend/signer.js`:
-```javascript
-async function retireCredits(entity, amount) {
-  const tx = await creditToken.retireCredits(entity, amount)
-  return await tx.wait()
-}
-module.exports = { ..., retireCredits }
 ```
-
-**Step 2** — Add the route in `backend/index.js`:
-```javascript
-app.post('/retire-credits', async (req, res) => {
-  const { entity, amount } = req.body
-  const receipt = await retireCredits(entity, BigInt(amount))
-  res.json({ success: true, txHash: receipt.hash })
-})
-```
-
-**Step 3** — Call it:
-```powershell
-Invoke-WebRequest -Uri http://localhost:4000/retire-credits -Method POST `
-  -ContentType "application/json" `
-  -Body '{"entity":"0xYOUR_ADDRESS","amount":100}' -UseBasicParsing
+1. Wallet connects (wagmi useAccount)
+2. useEntityProfile() runs:
+   a. hashAccountId(address) → deterministic hash (e.g. SHA-256 truncated)
+   b. GET /entity/profile/:hashedId
+   c. If 404 → needsOnboarding = true
+3. BusinessOnboardingModal renders (isOpen={needsOnboarding})
+4. User types business name → clicks submit
+5. createProfile(businessName) calls POST /entity/profile { accountId, businessName }
+6. EntityProfile saved in MongoDB
+7. Modal closes, header now shows business name
 ```
 
 ---
 
-### Add a new Solidity function
+## 8. Environment Variables Reference
 
-**Step 1** — Add the function in the relevant `.sol` file with appropriate role guard:
-```solidity
-function myNewFunction(address entity, uint256 amount)
-    external onlyRole(BACKEND_ROLE)
-{
-    // your logic
-    emit MyNewEvent(entity, amount);
-}
-```
+### Root `.env` (Hardhat config)
 
-**Step 2** — Recompile: `npx hardhat compile`
-
-**Step 3** — Add it to `frontend/src/lib/contracts.js`:
-```javascript
-export const CARBON_CREDIT_TOKEN_ABI = [
-  ...existing entries,
-  { type: 'function', name: 'myNewFunction', stateMutability: 'nonpayable',
-    inputs: [{ name: 'entity', type: 'address' }, { name: 'amount', type: 'uint256' }],
-    outputs: [] },
-]
-```
-
-**Step 4** — Redeploy locally: `.\start.ps1`
-
----
-
-### Add a new frontend hook
-
-**Step 1** — Create `frontend/src/hooks/useMyData.js`:
-```javascript
-import { useReadContract } from 'wagmi'
-import { CONTRACT_ADDRESSES, CARBON_CREDIT_TOKEN_ABI } from '../lib/contracts'
-
-export function useMyData(address) {
-  return useReadContract({
-    address: CONTRACT_ADDRESSES.carbonCreditToken,
-    abi: CARBON_CREDIT_TOKEN_ABI,
-    functionName: 'netCredits',
-    args: [address],
-    query: { enabled: !!address },
-  })
-}
-```
-
-**Step 2** — Use it in `App.jsx`:
-```jsx
-import { useMyData } from './hooks/useMyData'
-
-const { data: myData } = useMyData(address)
-```
-
----
-
-### Add a new contract event listener
-
-**Step 1** — Add the event signature to `backend/listener.js` ABI:
-```javascript
-const CARBON_CREDIT_TOKEN_ABI = [
-  ...existing,
-  "event MyNewEvent(address indexed entity, uint256 amount)",
-]
-```
-
-**Step 2** — Subscribe inside `startListeners()`:
-```javascript
-tokenContract.on("MyNewEvent", (entity, amount, event) => {
-  onEvent({
-    type: "MyNewEvent",
-    entity,
-    amount: amount.toString(),
-    txHash: event.log.transactionHash,
-  })
-})
-```
-
-The event will automatically appear in the Live Feed on the frontend.
-
----
-
-### Add a new page / route
-
-Vite uses plain React — there's no file-based routing. To add a second page, install React Router:
-
-```powershell
-npm install react-router-dom
-```
-
-Then in `main.jsx`:
-```jsx
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import History from './pages/History'
-
-<BrowserRouter>
-  <Routes>
-    <Route path="/"        element={<App />} />
-    <Route path="/history" element={<History />} />
-  </Routes>
-</BrowserRouter>
-```
-
----
-
-## 7. Environment Variables Reference
+| Variable | Required for | Description |
+|----------|-------------|-------------|
+| `DEPLOYER_PRIVATE_KEY` | Sepolia deploy only | 64-char hex private key (with or without `0x`). Leave empty for local. |
+| `SEPOLIA_RPC_URL` | Sepolia deploy only | e.g. `https://sepolia.infura.io/v3/YOUR_KEY` |
+| `ETHERSCAN_API_KEY` | Contract verification only | From etherscan.io |
 
 ### `backend/.env`
 
-| Variable | Example | Purpose |
-|---|---|---|
-| `RPC_URL` | `ws://127.0.0.1:8545` | WebSocket connection to the node (for event listening) |
-| `BACKEND_PRIVATE_KEY` | `0xac09...` | Signs `BACKEND_ROLE` transactions (Hardhat Account #0) |
-| `CARBON_CREDIT_TOKEN_ADDRESS` | `0x5FbDB...` | Contract address for signer + listener |
-| `MARKETPLACE_ADDRESS` | `0xe7f17...` | Contract address for listener |
-| `PORT` | `4000` | HTTP + WS server port |
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `RPC_URL` | `ws://127.0.0.1:8545` | WebSocket RPC for event listener (use `wss://` for hosted nodes) |
+| `BACKEND_PRIVATE_KEY` | `0xac0974...` | Wallet with BACKEND_ROLE. On local = Hardhat Account #0. |
+| `CARBON_CREDIT_TOKEN_ADDRESS` | `0x5FbDB...` | Deployed CarbonCreditToken address |
+| `MARKETPLACE_ADDRESS` | `0xe7f1...` | Deployed CarbonMarketplace address |
+| `PORT` | `4000` | Backend HTTP/WS port |
+| `MONGO_URI` | `mongodb://localhost:27017/carbocred` | MongoDB connection string |
 
 ### `frontend/.env`
 
-| Variable | Example | Purpose |
-|---|---|---|
-| `VITE_CARBON_CREDIT_TOKEN_ADDRESS` | `0x5FbDB...` | Read by `contracts.js` for all contract reads |
-| `VITE_MARKETPLACE_ADDRESS` | `0xe7f17...` | Read by `contracts.js` for marketplace interactions |
-| `VITE_BACKEND_WS_URL` | `ws://localhost:4000` | WebSocket URL used in `useLiveFeed.js` |
-| `VITE_CHAIN_ID` | `31337` | Hardhat local chain ID (informational) |
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `VITE_CARBON_CREDIT_TOKEN_ADDRESS` | `0x5FbDB...` | Must match backend |
+| `VITE_MARKETPLACE_ADDRESS` | `0xe7f1...` | Must match backend |
+| `VITE_BACKEND_WS_URL` | `ws://localhost:4000` | WebSocket URL for live feed |
+| `VITE_CHAIN_ID` | `31337` | Chain ID (31337 = Hardhat local, 11155111 = Sepolia) |
 
-> ⚠ **After every `.\start.ps1` run**, the addresses in both `.env` files are
-> automatically updated because Hardhat redeploys to fresh addresses on restart.
-> You should also **reset MetaMask's activity data** after every Hardhat restart
-> (Settings → Advanced → Clear activity tab data).
+> **Important:** All three `.env` files must use the **same contract addresses** after every deployment.  
+> The `start.ps1` script auto-syncs `backend/.env` and `frontend/.env` after deployment.
+
+---
+
+## 9. Directory Structure
+
+```
+CarboCred/
+│
+├── contracts/                  # Solidity smart contracts
+│   ├── CarbonCreditToken.sol   # ERC-1155 token (credits + debt)
+│   └── CarbonMarketplace.sol   # P2P listing marketplace
+│
+├── scripts/                    # Hardhat deployment scripts
+│   ├── deploy.js               # Manual deploy (verbose output)
+│   └── getAddresses.js         # Deploy + write addresses.json
+│
+├── test/                       # Hardhat test files
+│   └── *.js
+│
+├── artifacts/                  # Compiled contract artifacts (auto-generated)
+├── cache/                      # Hardhat compilation cache
+│
+├── backend/                    # Node.js backend server
+│   ├── index.js                # Express + WebSocket server entry point
+│   ├── listener.js             # Contract event subscription + relay
+│   ├── signer.js               # BACKEND_ROLE wallet + contract calls
+│   ├── package.json
+│   ├── .env                    # Backend environment variables
+│   └── src/
+│       ├── models/
+│       │   └── EntityProfile.js  # Mongoose schema
+│       ├── controllers/
+│       │   └── entityProfile.controller.js
+│       ├── routes/
+│       │   └── entityProfile.routes.js
+│       └── utils/
+│           └── (shared backend utils)
+│
+├── frontend/                   # Vite + React frontend
+│   ├── src/
+│   │   ├── main.jsx            # App root, WagmiProvider
+│   │   ├── App.jsx             # Main component, view-state routing
+│   │   ├── App.css             # Global styles
+│   │   │
+│   │   ├── lib/                # Shared config & constants
+│   │   │   ├── contracts.js    # ABIs + CONTRACT_ADDRESSES + enums
+│   │   │   ├── wagmiConfig.js  # Chain config + connectors
+│   │   │   └── carbonCalculator.js # Emission/reduction calculation
+│   │   │
+│   │   ├── hooks/              # Custom React hooks
+│   │   │   ├── useEntityPosition.js
+│   │   │   ├── useMarketplace.js
+│   │   │   ├── useLiveFeed.js
+│   │   │   ├── useCarbonAward.js
+│   │   │   ├── useEntityProfile.js
+│   │   │   ├── usePublicCarbonData.js
+│   │   │   ├── useUserTransactions.js
+│   │   │   ├── useTxVerification.js
+│   │   │   └── useCarbonAnalytics.js
+│   │   │
+│   │   ├── pages/              # Full-page views
+│   │   │   ├── UserTransactions.jsx
+│   │   │   ├── BusinessAnalytics.jsx
+│   │   │   ├── PurchaseSuccess.jsx
+│   │   │   ├── VerifyTransaction.jsx
+│   │   │   └── PublicDashboard.jsx
+│   │   │
+│   │   ├── components/         # Reusable UI components
+│   │   │   ├── BusinessOnboardingModal.jsx
+│   │   │   ├── CarbonImpactDashboard.jsx
+│   │   │   ├── CarbonTrendChart.jsx
+│   │   │   ├── EmissionBreakdownChart.jsx
+│   │   │   ├── FirmTable.jsx
+│   │   │   ├── GlobalStats.jsx
+│   │   │   ├── NetZeroGauge.jsx
+│   │   │   ├── QRScanner.jsx
+│   │   │   ├── TransactionQR.jsx
+│   │   │   └── UserTransactionTable.jsx
+│   │   │
+│   │   └── utils/              # Pure utility functions
+│   │       ├── blockchainReader.js    # viem-based read-only chain queries
+│   │       ├── transactionParser.js   # Decode tx calldata for Verify page
+│   │       ├── carbonAnalyticsEngine.js # Time-series analytics from events
+│   │       ├── hashAccountId.js       # Privacy-preserving address hashing
+│   │       └── qrGenerator.js         # QR code base64 generator
+│   │
+│   ├── .env                    # Frontend environment variables
+│   ├── index.html
+│   ├── vite.config.js
+│   └── package.json
+│
+├── hardhat.config.js           # Hardhat network + compiler config
+├── package.json                # Root package (Hardhat dependencies)
+├── .env                        # Root env (Sepolia keys — optional for local)
+├── .env.example                # Template for .env
+├── start.ps1                   # ONE-CLICK local dev startup script
+└── ARCHITECTURE.md             # This file
+```
+
+---
+
+## 10. Local Development Setup
+
+### Prerequisites
+
+- Node.js ≥ 18
+- npm ≥ 9
+- MongoDB running locally (default port 27017)
+- MetaMask browser extension
+
+### Step-by-Step
+
+#### 1. Install dependencies
+
+```powershell
+# Root (Hardhat)
+npm install
+
+# Backend
+cd backend && npm install && cd ..
+
+# Frontend
+cd frontend && npm install && cd ..
+```
+
+#### 2. Start everything with one command
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+This script automatically:
+1. Kills any stale processes on ports 4000, 3000, 8545
+2. Starts `npx hardhat node` in a new terminal window (port 8545)
+3. Waits 5 seconds for the node to be ready
+4. Runs `getAddresses.js` to deploy contracts → writes `addresses.json`
+5. Syncs `backend/.env` and `frontend/.env` with the new contract addresses
+6. Starts `node index.js` in a new terminal (backend, port 4000)
+7. Awards 1000 test credits to Hardhat Account #0 via `POST /award`
+8. Starts `npm run dev` in a new terminal (frontend, port 3000)
+
+#### 3. Configure MetaMask
+
+1. Add network: **Hardhat Local**
+   - RPC URL: `http://127.0.0.1:8545`
+   - Chain ID: `31337`
+   - Currency: ETH
+2. Import Hardhat Account #0:
+   - Private key: `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`
+   - This account has 10,000 ETH and 1000 pre-awarded credits
+
+> ⚠️ **Always reset MetaMask account** (Settings → Advanced → Clear activity tab data) after restarting the Hardhat node, because the node resets nonces.
+
+#### Manual startup (if start.ps1 fails)
+
+```powershell
+# Terminal 1 — Hardhat node
+npx hardhat node
+
+# Terminal 2 — Deploy contracts
+npx hardhat run scripts/getAddresses.js --network localhost
+# Copy addresses from output into backend/.env and frontend/.env
+
+# Terminal 3 — Backend
+cd backend && node index.js
+
+# Terminal 4 — Frontend
+cd frontend && npm run dev
+```
+
+---
+
+## 11. Deployment (Sepolia Testnet)
+
+#### 1. Fill root `.env`
+
+```env
+DEPLOYER_PRIVATE_KEY=0x<your-64-char-key>
+SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/<your-project-id>
+ETHERSCAN_API_KEY=<optional>
+```
+
+#### 2. Deploy contracts
+
+```bash
+npx hardhat run scripts/deploy.js --network sepolia
+```
+
+Note the deployed addresses from the output.
+
+#### 3. Update env files
+
+`backend/.env`:
+```env
+RPC_URL=wss://sepolia.infura.io/ws/v3/<your-project-id>
+BACKEND_PRIVATE_KEY=0x<backend-wallet-key>
+CARBON_CREDIT_TOKEN_ADDRESS=<deployed-token-address>
+MARKETPLACE_ADDRESS=<deployed-marketplace-address>
+MONGO_URI=mongodb+srv://...
+PORT=4000
+```
+
+`frontend/.env`:
+```env
+VITE_CARBON_CREDIT_TOKEN_ADDRESS=<deployed-token-address>
+VITE_MARKETPLACE_ADDRESS=<deployed-marketplace-address>
+VITE_BACKEND_WS_URL=wss://your-backend.com
+VITE_CHAIN_ID=11155111
+```
+
+#### 4. Grant BACKEND_ROLE
+
+After deploying, the backend wallet must hold `BACKEND_ROLE`. The deploy script (`getAddresses.js`) grants it to the deployer — if the backend uses a different wallet, grant it manually:
+
+```js
+await creditToken.grantRole(BACKEND_ROLE, backendWalletAddress)
+```
+
+#### 5. Build and serve frontend
+
+```bash
+cd frontend && npm run build
+# Serve the dist/ folder with any static host (Netlify, Vercel, Nginx, etc.)
+```
+
+---
+
+## 12. Security Design
+
+| Threat | Mitigation |
+|--------|-----------|
+| Reentrancy attacks | `ReentrancyGuard` on all state-mutating marketplace functions |
+| Front-running on purchase | CEI pattern: state change before ETH transfer before token transfer |
+| Stale listing exploit | Seller balance re-validated at purchase time (not just listing time) |
+| Net emitter selling unpaid credits | `listCredits` checks `netCredits >= amount` on-chain |
+| Debt token transfer (soulbound bypass) | `_update` hook reverts on any DEBT_TOKEN transfer between non-zero addresses |
+| Unauthorized credit minting | `awardCredits`/`recordDebt` gated by `BACKEND_ROLE` (role-based access control) |
+| Unauthorized marketplace settlement | `settleTransfer` gated by `MARKETPLACE_ROLE`, only held by the marketplace contract |
+| Raw wallet address exposure | Business profiles store hashed account IDs, not raw wallet addresses |
+| Invalid backend private key crash | `hardhat.config.js` validates key length before including in Sepolia accounts |
+| WebSocket RPC disconnect crashes Node | `listener.js` attaches a raw `error` event handler to the underlying websocket to prevent unhandled process exit |
+| Arbitrary award without consent | `/award` endpoint accepts optional `signature`. If provided, verified against the entity address |
