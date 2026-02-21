@@ -1,33 +1,86 @@
-import React, { useState } from 'react';
-import { Scanner } from '@yudiel/react-qr-scanner';
+import React, { useState, useRef } from 'react';
+import jsQR from 'jsqr';
 
+/**
+ * QRScanner — Image Upload Mode
+ * Accepts a QR code image from a file picker and decodes it using jsQR.
+ * Validates the CARBOCRED_TX payload format before passing the hash up.
+ */
 export function QRScanner({ onScanSuccess }) {
-    const [scanError, setScanError] = useState('');
+    const [preview, setPreview] = useState(null);
+    const [status, setStatus] = useState('idle'); // 'idle' | 'decoding' | 'success' | 'error'
+    const [errorMsg, setErrorMsg] = useState('');
+    const inputRef = useRef(null);
+    const canvasRef = useRef(null);
 
-    const handleDecode = (result) => {
-        if (!result || !result.length) return;
-
-        // Use the first valid result string from the array
-        const rawData = result[0].rawValue;
-
-        try {
-            const payload = JSON.parse(rawData);
-
-            // Strict Validation Rule: Must have CARBOCRED_TX signature.
-            if (payload.type === 'CARBOCRED_TX' && payload.txHash) {
-                setScanError('');
-                onScanSuccess(payload.txHash);
-            } else {
-                setScanError('Invalid QR Code. Not a CarboCred Transaction.');
-            }
-        } catch (e) {
-            setScanError('Malformed QR payload. Unable to parse JSON.');
-        }
+    const reset = () => {
+        setPreview(null);
+        setStatus('idle');
+        setErrorMsg('');
+        if (inputRef.current) inputRef.current.value = '';
     };
 
-    const handleError = (error) => {
-        setScanError('Camera initialization failed or access denied.');
-        console.error('QR Scanner Error:', error);
+    const handleFileChange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        // Only accept images
+        if (!file.type.startsWith('image/')) {
+            setErrorMsg('Please select a valid image file.');
+            setStatus('error');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const dataUrl = ev.target.result;
+            setPreview(dataUrl);
+            setStatus('decoding');
+            setErrorMsg('');
+            decodeQRFromDataUrl(dataUrl);
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const decodeQRFromDataUrl = (dataUrl) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = canvasRef.current;
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
+            const result = jsQR(imageData.data, imageData.width, imageData.height);
+
+            if (!result) {
+                setStatus('error');
+                setErrorMsg('No QR code detected in this image. Try a clearer photo.');
+                return;
+            }
+
+            // Validate CARBOCRED_TX payload
+            try {
+                const payload = JSON.parse(result.data);
+                if (payload.type === 'CARBOCRED_TX' && payload.txHash) {
+                    setStatus('success');
+                    setErrorMsg('');
+                    onScanSuccess(payload.txHash);
+                } else {
+                    setStatus('error');
+                    setErrorMsg('Invalid QR — not a CarboCred transaction receipt.');
+                }
+            } catch {
+                setStatus('error');
+                setErrorMsg('Malformed QR payload. This QR cannot be parsed.');
+            }
+        };
+        img.onerror = () => {
+            setStatus('error');
+            setErrorMsg('Failed to load image. Please try another file.');
+        };
+        img.src = dataUrl;
     };
 
     return (
@@ -35,53 +88,71 @@ export function QRScanner({ onScanSuccess }) {
 
             {/* Header */}
             <div className="w-full bg-slate-900 border-b border-slate-700 p-4 flex items-center gap-3">
-                <span className="text-xl">📷</span>
-                <h3 className="text-white font-semibold">Decentralized Scanner</h3>
+                <span className="text-xl">🖼️</span>
+                <h3 className="text-white font-semibold">Upload QR Image</h3>
             </div>
 
-            {/* Viewport */}
-            <div className="w-full relative aspect-square bg-black">
-                <Scanner
-                    onScan={handleDecode}
-                    onError={handleError}
-                    components={{
-                        audio: false,       // Beep off
-                        onOff: true,        // Flashlight toggle allowed if device supports
-                        torch: false,
-                        zoom: false,
-                        finder: true        // Draw standard QR frame
-                    }}
-                    styles={{
-                        container: { width: '100%', height: '100%', padding: '2rem' },
-                        finderBorder: 2,
-                        video: { objectFit: 'cover' }
-                    }}
-                />
-
-                {/* Animated Scan Line Overlay */}
-                <div className="absolute top-0 left-0 w-full h-full pointer-events-none z-10 opacity-30 shadow-[0_0_50px_rgba(34,197,94,0.5)] bg-gradient-to-b from-transparent via-green-500 to-transparent animate-[scan_2s_ease-in-out_infinite]" />
-            </div>
-
-            {/* Footer Status */}
-            <div className="w-full p-4 bg-slate-900 min-h-[5rem] flex items-center justify-center border-t border-slate-700">
-                {scanError ? (
-                    <div className="text-red-400 text-sm font-medium flex items-center gap-2">
-                        <span>❌</span> {scanError}
+            {/* Drop Zone / Preview */}
+            <div className="w-full p-6 flex flex-col items-center gap-4">
+                {!preview ? (
+                    <div
+                        onClick={() => inputRef.current?.click()}
+                        className="w-full border-2 border-dashed border-slate-600 hover:border-blue-500 rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer transition-colors group"
+                    >
+                        <div className="text-5xl group-hover:scale-110 transition-transform">📁</div>
+                        <p className="text-slate-300 font-medium">Click to upload QR image</p>
+                        <p className="text-slate-500 text-sm">PNG, JPG, WEBP supported</p>
                     </div>
                 ) : (
-                    <div className="text-slate-400 text-sm animate-pulse">
-                        Align QR code within the frame...
+                    <div className="relative w-full flex flex-col items-center gap-3">
+                        <img
+                            src={preview}
+                            alt="Uploaded QR"
+                            className="w-56 h-56 object-contain rounded-xl border border-slate-600 bg-white p-2 shadow"
+                        />
+                        {status === 'decoding' && (
+                            <div className="text-blue-400 text-sm animate-pulse">🔍 Scanning for QR code...</div>
+                        )}
+                        {status === 'success' && (
+                            <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+                                <span>✅</span> QR decoded! Verifying on-chain...
+                            </div>
+                        )}
+                        {status === 'error' && (
+                            <div className="flex items-center gap-2 text-red-400 text-sm font-medium text-center px-2">
+                                <span>❌</span> {errorMsg}
+                            </div>
+                        )}
+                        <button
+                            onClick={reset}
+                            className="mt-1 text-sm text-slate-400 hover:text-white underline transition-colors"
+                        >
+                            Upload a different image
+                        </button>
                     </div>
                 )}
+
+                {/* Hidden file input */}
+                <input
+                    ref={inputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                />
+
+                {/* Hidden canvas for decoding */}
+                <canvas ref={canvasRef} className="hidden" />
             </div>
 
-            {/* CSS Animation defined globally or injected here for tailwind */}
-            <style>{`
-                @keyframes scan {
-                    0% { transform: translateY(-100%); }
-                    100% { transform: translateY(100%); }
-                }
-            `}</style>
+            {/* Footer hint */}
+            {!preview && (
+                <div className="w-full px-6 pb-5 text-center">
+                    <p className="text-slate-500 text-xs">
+                        Upload the QR code image downloaded from the Purchase Success page.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

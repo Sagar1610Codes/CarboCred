@@ -2,22 +2,43 @@ import React, { useState, useEffect } from 'react';
 import { QRScanner } from '../components/QRScanner';
 import { useTxVerification } from '../hooks/useTxVerification';
 
+const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
+
 export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
     const [mode, setMode] = useState('SCAN'); // 'SCAN' or 'MANUAL'
     const [inputHash, setInputHash] = useState(initialHash);
-    const [activeHash, setActiveHash] = useState(initialHash); // The hash currently being verified
+    const [activeHash, setActiveHash] = useState(initialHash);
+    const [firmName, setFirmName] = useState(null);
 
     // Core Verification Hook Pipeline
     const { loading, exists, confirmed, receipt, error, timestamp, verifyTransaction } = useTxVerification();
 
     useEffect(() => {
-        // If loaded with a direct hash initially, verify it
         if (activeHash) {
             verifyTransaction(activeHash);
-            // Switch mode to manual display automatically if an initial Hash was supplied
             setMode('MANUAL');
         }
     }, [activeHash, verifyTransaction]);
+
+    // When receipt is confirmed, look up the firm name from the backend
+    useEffect(() => {
+        if (!receipt?.from) { setFirmName(null); return; }
+
+        // Backend stores profiles keyed by SHA-256(lowercase wallet address)
+        const hashAddress = async (address) => {
+            const encoded = new TextEncoder().encode(address.toLowerCase());
+            const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+            return Array.from(new Uint8Array(hashBuffer))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        };
+
+        hashAddress(receipt.from)
+            .then(accountId => fetch(`${BACKEND}/entity/profile/${accountId}`))
+            .then(r => r.ok ? r.json() : null)
+            .then(data => setFirmName(data?.businessName || null))
+            .catch(() => setFirmName(null));
+    }, [receipt]);
 
     const handleScanSuccess = (decodedHash) => {
         setInputHash(decodedHash);
@@ -63,7 +84,7 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
                 <div className="p-8 border border-red-900/50 rounded-xl bg-red-950/20 shadow-[0_0_15px_rgba(239,68,68,0.1)]">
                     <div className="flex items-center gap-3 mb-4">
                         <span className="text-3xl">❌</span>
-                        <h3 className="text-2xl font-bold text-red-500">Unverified / Invalid</h3>
+                        <h3 className="text-2xl font-bold text-red-500">Verification Failed</h3>
                     </div>
                     <p className="text-red-200/80 mb-2">The requested transaction could not be located on the blockchain.</p>
 
@@ -97,7 +118,7 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
                         ✅
                     </div>
                     <div>
-                        <h3 className="text-2xl font-bold text-green-400 tracking-tight">Verified Authentic</h3>
+                        <h3 className="text-2xl font-bold text-green-400 tracking-tight">Verification Successful</h3>
                         <p className="text-green-200/70 text-sm">Blockchain consensus confirmed.</p>
                     </div>
                 </div>
@@ -126,9 +147,11 @@ export default function VerifyTransaction({ initialHash = '', onReturnHome }) {
                     </div>
 
                     <div className="p-3 rounded-lg bg-slate-900/60 border border-slate-700/50 overflow-hidden">
-                        <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Sent From Wallet</span>
-                        <div className="text-sm text-slate-300 font-mono truncate break-all">
-                            {receipt.from}
+                        <span className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Firm Name</span>
+                        <div className="text-sm text-slate-300 font-semibold">
+                            {firmName ? firmName : (
+                                <span className="font-mono text-slate-400 text-xs break-all">{receipt.from}</span>
+                            )}
                         </div>
                     </div>
                 </div>
