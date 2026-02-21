@@ -1,10 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <meta name="description" content="CarboCred — Decentralised carbon credit marketplace powered by ERC-1155 tokens on Ethereum." />
+    <title>CarboCred — Carbon Credit Marketplace</title>
+    <!-- Flash-prevention: apply saved theme BEFORE React renders -->
+    <script>
+      ;(function () {
+        var saved = localStorage.getItem('carbocred-theme')
+        if (saved === 'dark' || saved === 'light') {
+          document.documentElement.setAttribute('data-theme', saved)
+        }
+        // default is 'light' (already set on <html> above)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

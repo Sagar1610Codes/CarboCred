@@ -8,7 +8,7 @@ import { useLiveFeed } from './hooks/useLiveFeed'
 import { useCarbonAward } from './hooks/useCarbonAward'
 import { calculateCredits } from './lib/carbonCalculator'
 import { ListingStatus } from './lib/contracts'
-import './App.css'
+import Navbar from './components/Navbar'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ function NetBadge({ net }) {
 
 // ── Main App ────────────────────────────────────────────────────────────────
 
-export default function App() {
+export default function Dashboard() {
   const { address, isConnected } = useAccount()
   const { connect, error: connectError } = useConnect()
   const { disconnect } = useDisconnect()
@@ -110,19 +110,19 @@ export default function App() {
 
   return (
     <main className="app">
-      {/* ── Header ─────────────────────────────────────────────────── */}
-      <header className="header">
-        <div className="header-left">
-          <span className="logo">🌿</span>
-          <h1>CarboCred</h1>
+      <Navbar />
+
+      {/* ── Wallet Bar ───────────────────────────────────────────── */}
+      <div className="dash-header">
+        <div className="dash-header-left">
+          <h1>Dashboard</h1>
           <span className="badge">ERC-1155 Marketplace</span>
           <a href="/public-dashboard.html" className="nav-link">
             Public Dashboard
           </a>
         </div>
-
         {isConnected ? (
-          <div className="header-right">
+          <div className="dash-header-right">
             {isWrongChain && (
               <button className="btn btn-warn" onClick={() => switchChain({ chainId: hardhat.id })}>
                 ⚠ Switch to Hardhat
@@ -132,12 +132,12 @@ export default function App() {
             <button className="btn btn-outline" onClick={() => disconnect()}>Disconnect</button>
           </div>
         ) : (
-          <div className="header-right">
+          <div className="dash-header-right">
             <button className="btn btn-primary" onClick={handleConnect}>Connect Wallet</button>
             {connectError && <span className="error-text">{connectError.message}</span>}
           </div>
         )}
-      </header>
+      </div>
 
       <div className="grid">
         {/* ── Left Panel ──────────────────────────────────────────── */}
