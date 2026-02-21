@@ -22,7 +22,7 @@ export function BusinessOnboardingModal({ isOpen, onSubmit, loading, error, acco
     <div className="modal-overlay">
       <div className="modal-content">
         <div className="modal-icon-ring">
-          <span className="modal-icon">🌿</span>
+          <img src="/logo.jpeg" alt="CarboCred" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
         </div>
 
         <h2 className="modal-title">Welcome to CarboCred</h2>
@@ -105,8 +105,8 @@ export function BusinessOnboardingModal({ isOpen, onSubmit, loading, error, acco
         }
 
         .modal-icon-ring {
-          width: 48px;
-          height: 48px;
+          width: 56px;
+          height: 56px;
           border-radius: 50%;
           background: rgba(16, 185, 129, 0.1);
           border: 1px solid rgba(16, 185, 129, 0.2);
@@ -114,7 +114,6 @@ export function BusinessOnboardingModal({ isOpen, onSubmit, loading, error, acco
           align-items: center;
           justify-content: center;
           margin-bottom: 1.25rem;
-          font-size: 1.3rem;
         }
 
         .modal-title {

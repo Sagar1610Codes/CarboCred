@@ -48,7 +48,16 @@
 }
 
 .pd-logo {
-    font-size: 1.6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pd-logo img {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
 }
 
 .pd-title {
@@ -130,6 +139,18 @@
     border-color: rgba(255, 255, 255, 0.15);
     color: var(--obs-text-1, #f8fafc);
     background: rgba(255, 255, 255, 0.04);
+}
+
+.pd-btn--primary {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #fff;
+    border: none;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+}
+
+.pd-btn--primary:hover {
+    box-shadow: 0 6px 16px rgba(16, 185, 129, 0.3);
+    transform: translateY(-1px);
 }
 
 .pd-btn--outline:disabled {

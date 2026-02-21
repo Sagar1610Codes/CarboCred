@@ -101,16 +101,34 @@ export function useUserTransactions() {
                 ...awards, ...debts, ...clears, ...sales, ...purchases, ...transfersFrom, ...transfersTo
             ];
 
-            // 3. Deduplicate by unique id (txHash-logIndex)
-            const uniqueMap = new Map();
+            // 3. Deduplicate by transaction hash and prioritize specific events
+            // Some transactions emit both a specific event (e.g. CreditsAwarded) and a generic TransferSingle.
+            // We group by hash and filter out generic transfers if a specific event exists in the same TX.
+            const txGroups = new Map();
             for (const log of allLogs) {
-                const id = `${log.transactionHash}-${log.logIndex}`;
-                if (!uniqueMap.has(id)) {
-                    uniqueMap.set(id, log);
-                }
+                const hash = log.transactionHash;
+                if (!txGroups.has(hash)) txGroups.set(hash, []);
+                txGroups.get(hash).push(log);
             }
 
-            const uniqueLogs = Array.from(uniqueMap.values());
+            const uniqueLogs = [];
+            const SPECIFIC_EVENTS = ['CreditsAwarded', 'DebtRecorded', 'DebtCleared', 'BalanceUpdated', 'TradeExecuted', 'CreditIssued'];
+
+            for (const [hash, logs] of txGroups) {
+                const hasSpecific = logs.some(l => SPECIFIC_EVENTS.includes(l.eventName));
+                if (hasSpecific) {
+                    // Keep only the specific events, filter out generic transfers
+                    uniqueLogs.push(...logs.filter(l => SPECIFIC_EVENTS.includes(l.eventName)));
+                } else {
+                    // No specific events, keep all logs (they are likely direct transfers)
+                    // But still deduplicate by logIndex to handle overlapping queries
+                    const logIndexMap = new Map();
+                    for (const l of logs) {
+                        logIndexMap.set(l.logIndex, l);
+                    }
+                    uniqueLogs.push(...logIndexMap.values());
+                }
+            }
 
             // 4. Normalize and sort
             const txs = normalizeTransactions(uniqueLogs, address);

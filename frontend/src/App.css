@@ -73,7 +73,17 @@ body {
 }
 
 .logo {
-  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo img {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
 }
 
 .header-left h1 {

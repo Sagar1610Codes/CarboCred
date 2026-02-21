@@ -84,48 +84,48 @@ export function QRScanner({ onScanSuccess }) {
     };
 
     return (
-        <div className="flex flex-col items-center bg-slate-800/80 border border-slate-700/80 rounded-2xl shadow-xl w-full max-w-md mx-auto overflow-hidden">
-
+        <div style={s.container}>
             {/* Header */}
-            <div className="w-full bg-slate-900 border-b border-slate-700 p-4 flex items-center gap-3">
-                <span className="text-xl">🖼️</span>
-                <h3 className="text-white font-semibold">Upload QR Image</h3>
+            <div style={s.header}>
+                <span style={s.headerIcon}>🖼️</span>
+                <h3 style={s.headerTitle}>Upload QR Image</h3>
             </div>
 
             {/* Drop Zone / Preview */}
-            <div className="w-full p-6 flex flex-col items-center gap-4">
+            <div style={s.body}>
                 {!preview ? (
                     <div
                         onClick={() => inputRef.current?.click()}
-                        className="w-full border-2 border-dashed border-slate-600 hover:border-blue-500 rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer transition-colors group"
+                        style={s.dropZone}
+                        className="group"
                     >
-                        <div className="text-5xl group-hover:scale-110 transition-transform">📁</div>
-                        <p className="text-slate-300 font-medium">Click to upload QR image</p>
-                        <p className="text-slate-500 text-sm">PNG, JPG, WEBP supported</p>
+                        <div style={s.uploadIcon} className="group-hover:scale-110 transition-transform">📁</div>
+                        <p style={s.uploadTitle}>Click to upload QR image</p>
+                        <p style={s.uploadSub}>PNG, JPG, WEBP supported</p>
                     </div>
                 ) : (
-                    <div className="relative w-full flex flex-col items-center gap-3">
+                    <div style={s.previewArea}>
                         <img
                             src={preview}
                             alt="Uploaded QR"
-                            className="w-56 h-56 object-contain rounded-xl border border-slate-600 bg-white p-2 shadow"
+                            style={s.previewImg}
                         />
                         {status === 'decoding' && (
-                            <div className="text-blue-400 text-sm animate-pulse">🔍 Scanning for QR code...</div>
+                            <div style={s.statusDecoding}>🔍 Scanning for QR code...</div>
                         )}
                         {status === 'success' && (
-                            <div className="flex items-center gap-2 text-green-400 text-sm font-semibold">
+                            <div style={s.statusSuccess}>
                                 <span>✅</span> QR decoded! Verifying on-chain...
                             </div>
                         )}
                         {status === 'error' && (
-                            <div className="flex items-center gap-2 text-red-400 text-sm font-medium text-center px-2">
+                            <div style={s.statusError}>
                                 <span>❌</span> {errorMsg}
                             </div>
                         )}
                         <button
                             onClick={reset}
-                            className="mt-1 text-sm text-slate-400 hover:text-white underline transition-colors"
+                            style={s.btnReset}
                         >
                             Upload a different image
                         </button>
@@ -147,8 +147,8 @@ export function QRScanner({ onScanSuccess }) {
 
             {/* Footer hint */}
             {!preview && (
-                <div className="w-full px-6 pb-5 text-center">
-                    <p className="text-slate-500 text-xs">
+                <div style={s.footer}>
+                    <p style={s.footerText}>
                         Upload the QR code image downloaded from the Purchase Success page.
                     </p>
                 </div>
@@ -156,3 +156,41 @@ export function QRScanner({ onScanSuccess }) {
         </div>
     );
 }
+
+const s = {
+    container: {
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        background: 'var(--obs-surface)', border: '1px solid var(--obs-border)',
+        borderRadius: '1.25rem', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+        width: '100%', maxWidth: '440px', margin: '0 auto', overflow: 'hidden',
+    },
+    header: {
+        width: '100%', background: 'rgba(255,255,255,0.02)',
+        borderBottom: '1px solid var(--obs-border)', padding: '1.25rem',
+        display: 'flex', alignItems: 'center', gap: '0.75rem',
+    },
+    headerIcon: { fontSize: '1.5rem' },
+    headerTitle: { color: '#f8fafc', fontWeight: 700, margin: 0, fontSize: '1rem' },
+    body: { width: '100%', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' },
+    dropZone: {
+        width: '100%', border: '2px dashed var(--obs-border)', borderRadius: '1rem',
+        padding: '3rem 1.5rem', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', gap: '0.75rem', cursor: 'pointer',
+        transition: 'all 0.2s ease', background: 'rgba(255,255,255,0.01)',
+    },
+    uploadIcon: { fontSize: '3rem' },
+    uploadTitle: { color: 'var(--obs-text-2)', fontWeight: 600, margin: 0 },
+    uploadSub: { color: 'var(--obs-text-3)', fontSize: '0.8rem', margin: 0 },
+    previewArea: { width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' },
+    previewImg: {
+        width: '240px', height: '240px', objectFit: 'contain',
+        borderRadius: '0.75rem', border: '1px solid var(--obs-border)',
+        background: '#fff', padding: '0.75rem', boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+    },
+    statusDecoding: { color: 'var(--obs-blue)', fontSize: '0.85rem', fontWeight: 500 },
+    statusSuccess: { color: '#34d399', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' },
+    statusError: { color: '#f87171', fontSize: '0.85rem', fontWeight: 500, textAlign: 'center', padding: '0 0.5rem' },
+    btnReset: { background: 'none', border: 'none', color: 'var(--obs-text-3)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' },
+    footer: { width: '100%', padding: '0 1.5rem 1.5rem', textAlign: 'center' },
+    footerText: { color: 'var(--obs-text-3)', fontSize: '0.75rem', margin: 0, lineHeight: 1.4 },
+};

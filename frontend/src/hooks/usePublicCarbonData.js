@@ -100,11 +100,13 @@ export function usePublicCarbonData() {
                 })
             )
 
-            const enriched = balances.map(b => ({
-                ...b,
-                lastBlock: lastBlockMap.get(b.address.toLowerCase()) ?? null,
-                businessName: profileMap.get(b.address.toLowerCase()) ?? null,
-            }))
+            const enriched = balances
+                .map(b => ({
+                    ...b,
+                    lastBlock: lastBlockMap.get(b.address.toLowerCase()) ?? null,
+                    businessName: profileMap.get(b.address.toLowerCase()) ?? null,
+                }))
+                .filter(f => f.businessName?.toLowerCase() !== 'admin')
 
             // 5. Global stats
             const stats = computeGlobalStats(addresses, balances, events)

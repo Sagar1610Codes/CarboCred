@@ -12,7 +12,7 @@ import { ListingStatus } from './lib/contracts'
 import { BusinessOnboardingModal } from './components/BusinessOnboardingModal'
 import { SpotlightCard } from './components/SpotlightCard'
 import UserTransactions from './pages/UserTransactions'
-import BusinessAnalytics from './pages/BusinessAnalytics'
+import PersonalAnalytics from './pages/PersonalAnalytics'
 import AdminDashboard from './pages/AdminDashboard'
 import MarketplacePage from './pages/MarketplacePage'
 import PurchaseSuccess from './pages/PurchaseSuccess'
@@ -60,6 +60,18 @@ export default function App() {
   const { listCredits, isPending: isListing, error: listError } = useListCredits()
   const { purchase, isPending: isPurchasing, error: purchaseError } = usePurchaseListing()
   const { cancel, isPending: isCancelling } = useCancelListing()
+
+  // Derive available credits: Balance - Debt - Active Listings
+  const totalListed = useMemo(() => {
+    return (listings || [])
+      .filter(l => l.seller.toLowerCase() === address?.toLowerCase())
+      .reduce((sum, l) => sum + BigInt(l.amount), 0n)
+  }, [listings, address])
+
+  const availableCredits = useMemo(() => {
+    const net = BigInt(netCredits || 0n)
+    return net - totalListed
+  }, [netCredits, totalListed])
   const { events, connected: wsConnected } = useLiveFeed()
   const { isSubmitting, result, error: awardError, submitActivity, reset: resetAward } = useCarbonAward(token)
   const { accountId, businessName, needsOnboarding, createProfile, loading: profileLoading, error: profileError } = useEntityProfile()
@@ -106,13 +118,13 @@ export default function App() {
   function handleList(e) {
     e.preventDefault()
     setLocalListError(null)
-    if (netCredits < 0n) {
-      setLocalListError("You are currently a net emitter. You must offset your debt before you can sell credits.")
+    if (availableCredits < 0n) {
+      setLocalListError("You are currently a net emitter or have over-listed. You must offset your debt or cancel listings before you can sell more credits.")
       return
     }
     const amountBig = BigInt(listAmount)
-    if (netCredits < amountBig) {
-      setLocalListError(`Insufficient net credits. You only have ${netCredits.toString()} available to sell.`)
+    if (availableCredits < amountBig) {
+      setLocalListError(`Insufficient available credits. You only have ${availableCredits.toString()} available to sell (excluding active listings).`)
       return
     }
     listCredits(amountBig, listPriceEth)
@@ -164,7 +176,9 @@ export default function App() {
       {/* ── Header ─────────────────────────────────────────────────── */}
       <header className="header">
         <div className="header-left">
-          <span className="logo">🌿</span>
+          <span className="logo">
+            <img src="/logo.jpeg" alt="CarboCred" />
+          </span>
           <div className="brand">
             <h1>CarboCred</h1>
           </div>
@@ -235,7 +249,7 @@ export default function App() {
       {currentView === 'admin' ? (
         <AdminDashboard token={token} />
       ) : currentView === 'analytics' ? (
-        <BusinessAnalytics />
+        <PersonalAnalytics />
       ) : currentView === 'history' ? (
         <UserTransactions />
       ) : currentView === 'verify' ? (
@@ -253,7 +267,7 @@ export default function App() {
           isConnected={isConnected}
           credits={credits}
           debt={debt}
-          netCredits={netCredits}
+          netCredits={availableCredits}
           posLoading={posLoading}
           listings={listings}
           listLoading={listLoading}

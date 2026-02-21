@@ -48,7 +48,7 @@ export default function SignupPage({ onSwitchToLogin }) {
                     transition={{ delay: 0.2 }}
                     style={s.logoRow}
                 >
-                    <span style={s.logoIcon}>🌿</span>
+                    <img src="/logo.jpeg" alt="CarboCred" style={{ width: '56px', height: '56px', borderRadius: '14px', objectFit: 'cover', boxShadow: '0 0 20px rgba(16, 185, 129, 0.25)' }} />
                     <span style={s.logoText}>CarboCred</span>
                 </motion.div>
 

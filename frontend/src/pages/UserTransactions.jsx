@@ -98,7 +98,7 @@ export default function UserTransactions() {
                 <SummaryCard
                     title="Total Minted"
                     value={totalMinted.toString()}
-                    icon="🌿"
+                    icon={<img src="/logo.jpeg" alt="Logo" style={{ width: '20px', height: '20px', borderRadius: '4px', display: 'inline-block', verticalAlign: 'middle' }} />}
                     color="#4ade80"
                     bg="rgba(16, 185, 129, 0.1)"
                     loading={loading}

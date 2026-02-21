@@ -179,13 +179,13 @@ export default function MarketplacePage({
                 </div>
                 {isConnected && !posLoading && (
                     <div style={s.statsStrip}>
-                        <StatChip icon="🟢" label="Credits" value={credits.toString()} color="#10b981" />
+                        <StatChip icon="🟢" label="Available" value={netCredits.toString()} color="#10b981" />
                         <StatChip icon="🔴" label="Debt" value={debt.toString()} color="#f87171" />
                         <StatChip
                             icon="⚖️"
-                            label="Net Position"
+                            label="Net Available"
                             value={(netCredits >= 0n ? '+' : '') + netCredits.toString()}
-                            color={netCredits <= 0n ? '#10b981' : '#f87171'}
+                            color={netCredits >= 0n ? '#10b981' : '#f87171'}
                         />
                         <StatChip icon="📋" label="Open Listings" value={listings.length.toString()} color="#3b82f6" />
                     </div>
@@ -227,9 +227,9 @@ export default function MarketplacePage({
                         ) : (
                             <div style={s.posRows}>
                                 {[
-                                    { icon: '🟢', label: 'Credits (offsets)', value: credits.toString(), color: 'var(--obs-green)' },
+                                    { icon: '🟢', label: 'Available (unlisted)', value: netCredits.toString(), color: 'var(--obs-green)' },
                                     { icon: '🔴', label: 'Debt (emissions)', value: debt.toString(), color: 'var(--obs-red)' },
-                                    { icon: '⚖️', label: 'Net Position', value: (netCredits >= 0n ? '+' : '') + netCredits.toString(), color: netCredits <= 0n ? 'var(--obs-green)' : 'var(--obs-red)', bold: true },
+                                    { icon: '⚖️', label: 'Net Available', value: (netCredits >= 0n ? '+' : '') + netCredits.toString(), color: netCredits >= 0n ? 'var(--obs-green)' : 'var(--obs-red)', bold: true },
                                 ].map(row => (
                                     <div key={row.label} style={s.posRow}>
                                         <span style={s.posLabel}><span>{row.icon}</span> {row.label}</span>
