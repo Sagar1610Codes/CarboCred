@@ -1,122 +1,169 @@
-﻿# ============================================================
+# ============================================================
 # CarboCred Startup Script
+# Run this ONE script to start the entire local dev stack.
 # ============================================================
 
 Write-Host ""
-Write-Host "========================================"  -ForegroundColor Cyan
-Write-Host "   CarboCred Local Dev Startup"           -ForegroundColor Cyan
-Write-Host "========================================"  -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   CarboCred Local Dev Startup" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-$ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-#  1. Kill stale processes 
+# ?????? Step 1: Kill any stale processes on our ports ????????????????????????????????????????????????????????????????????????????????????
 Write-Host "[1/6] Clearing stale processes..." -ForegroundColor Yellow
+
 @(4000, 3000, 8545) | ForEach-Object {
     $port = $_
-    $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-    if ($conns) {
-        $conns | ForEach-Object {
-            if ($_.OwningProcess -gt 4) {
-                Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
-                Write-Host "   Killed PID $($_.OwningProcess) on port $port"
+    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    if ($conn) {
+        # A port can have multiple owners (e.g. IPv4 + IPv6). Kill all.
+        $conn | ForEach-Object {
+            $pid = $_.OwningProcess
+            if ($pid -gt 4) {  # skip System (PID 4) and Idle (PID 0)
+                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+                Write-Host "   Killed PID $pid on port $port"
             }
         }
     }
 }
+# Also kill any leftover node / hardhat processes by name
 Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-if (Test-Path "$ROOT\addresses.json") { Remove-Item "$ROOT\addresses.json" -Force }
 Start-Sleep -Seconds 2
+Write-Host "   Done." -ForegroundColor Green
 
-#  2. Start Hardhat node 
+# ?????? Step 2: Delete stale addresses.json so we always redeploy fresh ??????????????????????????????
+if (Test-Path "$scriptDir\addresses.json") {
+    Remove-Item "$scriptDir\addresses.json" -Force
+    Write-Host "   Removed stale addresses.json"
+}
+
+# ?????? Step 3: Start Hardhat node in background window ??????????????????????????????????????????????????????????????????????????????
 Write-Host "[2/6] Starting Hardhat node..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit","-Command","cd '$ROOT'; npx hardhat node" -WindowStyle Normal
-Write-Host "   Waiting for port 8545..."
-$ready = $false
+
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptDir'; npx hardhat node" -WindowStyle Normal
+
+# Wait until port 8545 is actually listening (up to 30 seconds)
+Write-Host "   Waiting for Hardhat RPC to be ready..."
+$hardhatReady = $false
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
-    if (Get-NetTCPConnection -LocalPort 8545 -State Listen -ErrorAction SilentlyContinue) {
-        $ready = $true
-        Write-Host "   Hardhat ready! (${i}s)" -ForegroundColor Green
+    $check = Get-NetTCPConnection -LocalPort 8545 -State Listen -ErrorAction SilentlyContinue
+    if ($check) {
+        $hardhatReady = $true
+        Write-Host "   Hardhat node is up on :8545 (took ~$($i+1)s)" -ForegroundColor Green
         break
     }
 }
-if (-not $ready) {
-    Write-Host "ERROR: Hardhat did not start in 30s." -ForegroundColor Red
+if (-not $hardhatReady) {
+    Write-Host "ERROR: Hardhat node did not start within 30 seconds. Aborting." -ForegroundColor Red
     exit 1
 }
+# Extra buffer so the chain is fully initialised before deploy
 Start-Sleep -Seconds 2
 
-#  3. Deploy contracts 
+# ?????? Step 4: Deploy contracts fresh and capture addresses ???????????????????????????????????????????????????????????????
 Write-Host "[3/6] Deploying contracts..." -ForegroundColor Yellow
+
 npx hardhat run scripts/getAddresses.js --network localhost
-if (-not (Test-Path "$ROOT\addresses.json")) {
-    Write-Host "ERROR: Deployment failed." -ForegroundColor Red
+
+if (-not (Test-Path "$scriptDir\addresses.json")) {
+    Write-Host "ERROR: Deployment failed ??? addresses.json was not created." -ForegroundColor Red
+    Write-Host "       Check the Hardhat window for contract errors." -ForegroundColor Red
     exit 1
 }
-$addr = Get-Content "$ROOT\addresses.json" | ConvertFrom-Json
-$tok = $addr.tokenAddress
-$mkt = $addr.marketplaceAddress
-Write-Host "   Token:       $tok"  -ForegroundColor Green
-Write-Host "   Marketplace: $mkt" -ForegroundColor Green
 
-#  4. Sync .env files 
+$addresses = Get-Content "$scriptDir\addresses.json" | ConvertFrom-Json
+$token  = $addresses.tokenAddress
+$market = $addresses.marketplaceAddress
+
+if (-not $token -or -not $market) {
+    Write-Host "ERROR: addresses.json is missing tokenAddress or marketplaceAddress." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "   Token:       $token" -ForegroundColor Green
+Write-Host "   Marketplace: $market" -ForegroundColor Green
+
+# ?????? Step 5: Sync .env files ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 Write-Host "[4/6] Syncing .env files..." -ForegroundColor Yellow
-$bEnv  = "RPC_URL=ws://127.0.0.1:8545`n"
-$bEnv += "BACKEND_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`n"
-$bEnv += "CARBON_CREDIT_TOKEN_ADDRESS=$tok`n"
-$bEnv += "MARKETPLACE_ADDRESS=$mkt`n"
-$bEnv += "PORT=4000`n"
-$bEnv += "MONGO_URI=mongodb+srv://kasshan:Kasshan%402006@cluster0.vpcmj3u.mongodb.net/carbocred"
-Set-Content -Path "$ROOT\backend\.env" -Value $bEnv
-$fEnv  = "VITE_CARBON_CREDIT_TOKEN_ADDRESS=$tok`n"
-$fEnv += "VITE_MARKETPLACE_ADDRESS=$mkt`n"
-$fEnv += "VITE_BACKEND_WS_URL=ws://localhost:4000`n"
-$fEnv += "VITE_CHAIN_ID=31337"
-Set-Content -Path "$ROOT\frontend\.env" -Value $fEnv
+
+$backendEnv = @"
+RPC_URL=ws://127.0.0.1:8545
+BACKEND_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+CARBON_CREDIT_TOKEN_ADDRESS=$token
+MARKETPLACE_ADDRESS=$market
+PORT=4000
+MONGO_URI=mongodb+srv://kasshan:Kasshan%402006@cluster0.vpcmj3u.mongodb.net/carbocred
+"@
+Set-Content -Path "$scriptDir\backend\.env" -Value $backendEnv
+
+$frontendEnv = @"
+VITE_CARBON_CREDIT_TOKEN_ADDRESS=$token
+VITE_MARKETPLACE_ADDRESS=$market
+VITE_BACKEND_WS_URL=ws://localhost:4000
+VITE_CHAIN_ID=31337
+"@
+Set-Content -Path "$scriptDir\frontend\.env" -Value $frontendEnv
+
 Write-Host "   backend/.env  updated"
 Write-Host "   frontend/.env updated"
 
-#  5. Start Backend 
+# ?????? Step 6: Start Backend ???????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 Write-Host "[5/6] Starting Backend server..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit","-Command","cd '$ROOT\backend'; node index.js" -WindowStyle Normal
-Write-Host "   Waiting for port 4000..."
-$bReady = $false
+
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptDir\backend'; node index.js" -WindowStyle Normal
+
+# Wait until port 4000 is ready
+Write-Host "   Waiting for backend API to be ready..."
+$backendReady = $false
 for ($i = 0; $i -lt 20; $i++) {
     Start-Sleep -Seconds 1
-    if (Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue) {
-        $bReady = $true
-        Write-Host "   Backend ready! (${i}s)" -ForegroundColor Green
+    $check = Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue
+    if ($check) {
+        $backendReady = $true
+        Write-Host "   Backend is up on :4000 (took ~$($i+1)s)" -ForegroundColor Green
         break
     }
 }
+if (-not $backendReady) {
+    Write-Host "   Warning: Backend not responding yet ??? continuing anyway." -ForegroundColor DarkYellow
+}
+
+# Award test credits to Hardhat Account #0
+Write-Host "   Awarding 1000 test credits to Account #0..." -ForegroundColor Cyan
 try {
-    Invoke-WebRequest -Uri http://localhost:4000/award -Method POST -ContentType "application/json" `
+    Invoke-WebRequest -Uri http://localhost:4000/award `
+        -Method POST `
+        -ContentType "application/json" `
         -Body '{"entity":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","amount":1000,"reason":"Test credits"}' `
         -UseBasicParsing | Out-Null
     Write-Host "   1000 credits awarded to Account #0!" -ForegroundColor Green
 } catch {
-    Write-Host "   Credits: Award failed, do it via API later." -ForegroundColor DarkYellow
+    Write-Host "   Warning: Could not award credits now. Use the API later." -ForegroundColor DarkYellow
 }
 
-#  6. Start Frontend 
+# ?????? Step 7: Start Frontend ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 Write-Host "[6/6] Starting Frontend..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit","-Command","cd '$ROOT\frontend'; npm run dev" -WindowStyle Normal
+
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptDir\frontend'; npm run dev" -WindowStyle Normal
 Start-Sleep -Seconds 3
 
-#  Done 
+# ?????? Done ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
 Write-Host ""
-Write-Host "========================================"  -ForegroundColor Green
-Write-Host "   CarboCred is running!"                 -ForegroundColor Green
-Write-Host "========================================"  -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   CarboCred is running!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "   Frontend:  http://localhost:3000"  -ForegroundColor Cyan
-Write-Host "   Backend:   http://localhost:4000"  -ForegroundColor Cyan
+Write-Host "   Frontend:  http://localhost:3000" -ForegroundColor Cyan
+Write-Host "   Backend:   http://localhost:4000" -ForegroundColor Cyan
 Write-Host "   Hardhat:   http://127.0.0.1:8545" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "   Account #0: 1000 credits, 10000 ETH"                                    -ForegroundColor Green
-Write-Host "   PK: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" -ForegroundColor DarkGray
+Write-Host "   Account #0 has 1000 test credits and 10,000 ETH" -ForegroundColor Green
+Write-Host "   Private Key: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "   IMPORTANT: Always use THIS script to start the app." -ForegroundColor Yellow
 Write-Host "   IMPORTANT: Reset MetaMask account after each restart." -ForegroundColor Yellow
 Write-Host ""
+

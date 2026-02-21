@@ -184,7 +184,7 @@ describe("CarboCred Ecosystem (ERC-1155)", function () {
         it("should revert listing when net position < amount", async function () {
             await expect(
                 marketplace.connect(seller).listCredits(500n, PRICE_PER_CREDIT)
-            ).to.be.revertedWith("Marketplace: net credit position too low to list");
+            ).to.be.revertedWith("Marketplace: insufficient available net credits (check locked listings)");
         });
 
         it("entity with only DEBT_TOKEN (net emitter) cannot list credits", async function () {
@@ -192,7 +192,7 @@ describe("CarboCred Ecosystem (ERC-1155)", function () {
             await creditToken.connect(backend).recordDebt(attacker.address, 50n, "emissions");
             await expect(
                 marketplace.connect(attacker).listCredits(10n, PRICE_PER_CREDIT)
-            ).to.be.revertedWith("Marketplace: net credit position too low to list");
+            ).to.be.revertedWith("Marketplace: insufficient available net credits (check locked listings)");
         });
 
         it("entity with credits but larger debt (net negative) cannot list", async function () {
@@ -200,7 +200,7 @@ describe("CarboCred Ecosystem (ERC-1155)", function () {
             await creditToken.connect(backend).recordDebt(seller.address, 300n, "factory");
             await expect(
                 marketplace.connect(seller).listCredits(10n, PRICE_PER_CREDIT)
-            ).to.be.revertedWith("Marketplace: net credit position too low to list");
+            ).to.be.revertedWith("Marketplace: insufficient available net credits (check locked listings)");
         });
 
         it("should revert listing with zero amount", async function () {
@@ -255,8 +255,12 @@ describe("CarboCred Ecosystem (ERC-1155)", function () {
             const totalPrice = CREDIT_AMOUNT * PRICE_PER_CREDIT;
             await marketplace.connect(buyer).purchaseListing(0n, { value: totalPrice });
 
-            // buyer now has 100 credits, 50 debt → net = +50
-            expect(await creditToken.netCredits(buyer.address)).to.equal(50n);
+            // Auto-offset: buyer had 50 DEBT, purchased 100 CREDIT.
+            // Contract burns min(50, 100) = 50 DEBT_TOKEN automatically.
+            // Buyer now has: 100 CREDIT, 0 DEBT → netCredits = +100
+            expect(await creditToken.balanceOf(buyer.address, CREDIT_TOKEN)).to.equal(100n);
+            expect(await creditToken.balanceOf(buyer.address, DEBT_TOKEN)).to.equal(0n);  // auto-burned
+            expect(await creditToken.netCredits(buyer.address)).to.equal(100n); // fully offset
         });
 
         it("should revert purchase with incorrect ETH", async function () {

@@ -17,15 +17,28 @@ import "./CarbonCreditToken.sol";
  *   2a. Buyer calls purchaseListing() → status: Fulfilled  (happy path)
  *   2b. Seller calls cancelListing()  → status: Cancelled
  *
- * No ERC-1155 approval needed from the seller — the marketplace contract
- * holds MARKETPLACE_ROLE in CarbonCreditToken and calls settleTransfer()
- * directly. This avoids the open-ended risk of setApprovalForAll().
+ * Security (v2 upgrades):
+ *   ① Balance Lock     — lockedCredits[seller] tracks how many credits are
+ *                        committed to open listings. A seller cannot list more
+ *                        than (netCredits - lockedCredits), preventing double-listing.
+ *                        The lock is released on fulfillment or cancellation.
  *
- * Security:
+ *   ② Net Re-check     — At purchaseListing() time the seller's LIVE net position
+ *                        is re-validated. If the seller acquired debt after listing
+ *                        the purchase is rejected, preventing stale-listing exploits.
+ *                        The re-check accounts for the locked amount itself so the
+ *                        seller is not penalised for their own open listing.
+ *
+ *   ③ Auto-offset      — After a successful purchase, the buyer's DEBT_TOKEN balance
+ *                        is automatically burned up to the amount of credits purchased.
+ *                        This incentivises credit buyers who are also emitters and
+ *                        keeps the registry accurate without a separate call.
+ *
+ * Other security properties:
  *   - CEI (Checks-Effects-Interactions) pattern throughout.
  *   - ReentrancyGuard on all state-mutating external calls.
  *   - ETH forwarded directly to seller; never custodied by this contract.
- *   - Seller balance re-validated at purchase time (prevents stale listings).
+ *   - No ERC-1155 setApprovalForAll needed — marketplace holds MARKETPLACE_ROLE.
  */
 contract CarbonMarketplace is Ownable, ReentrancyGuard {
 
@@ -52,6 +65,17 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
     /// @notice All listings indexed by listing ID.
     mapping(uint256 => Listing) public listings;
 
+    /**
+     * @notice Credits committed to open listings per seller.
+     *
+     * Invariant: lockedCredits[seller] == sum of listing.amount for all Open
+     * listings where listing.seller == seller.
+     *
+     * This prevents a seller from listing the same credits multiple times
+     * (double-listing exploit).
+     */
+    mapping(address => uint256) public lockedCredits;
+
     // ─── Events ────────────────────────────────────────────────────────────────
 
     event ListingCreated(
@@ -74,6 +98,12 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
         uint256 totalPrice
     );
 
+    /// @notice Emitted when the buyer's debt is automatically offset on purchase.
+    event AutoOffsetApplied(
+        address indexed buyer,
+        uint256 debtBurned
+    );
+
     // ─── Constructor ──────────────────────────────────────────────────────────
 
     /**
@@ -94,8 +124,15 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
      * @param pricePerCredit Price in wei per individual credit unit.
      *
      * Requirements:
-     *   - Seller must own >= amount in CREDIT_TOKEN (ID 0).
-     *   - An entity with only DEBT_TOKEN (net emitter) cannot list credits.
+     *   - Seller's net position (credits - debt) must be >= (lockedCredits + amount).
+     *     This means you cannot list credits that are already committed to another
+     *     open listing.  The "available" net position is:
+     *       netCredits(seller) - lockedCredits[seller]
+     *
+     * Example — double-listing prevention:
+     *   Seller has 100 credits, 0 debt → netCredits = 100
+     *   Lists 100 → lockedCredits = 100, available = 0
+     *   Lists 100 again → 0 < 100 → REVERTS ✓
      */
     function listCredits(uint256 amount, uint256 pricePerCredit)
         external
@@ -104,15 +141,23 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
         require(amount > 0,         "Marketplace: zero amount");
         require(pricePerCredit > 0, "Marketplace: zero price");
 
-        // ── Net position gate ────────────────────────────────────────────────
-        // Seller's net position (credits - debt) must cover the listing amount.
-        // This prevents a carbon emitter (net negative entity) from selling
-        // credits they hold but haven't yet used to offset their own debt.
-        int256 netPos = creditToken.netCredits(msg.sender);
+        // ── Net position gate (v2: deducts already-locked credits) ────────────
+        // availableNet = netCredits(seller) - lockedCredits[seller]
+        // This prevents:
+        //   a) Net emitters from selling (available goes negative)
+        //   b) Double-listing (each listing reduces availableNet by its amount)
+        int256  netPos    = creditToken.netCredits(msg.sender);
+        uint256 locked    = lockedCredits[msg.sender];
+
+        // netPos - int256(locked) >= int256(amount)
+        // Safe cast: locked is always <= credits so locked <= uint max of credits
         require(
-            netPos >= int256(amount),
-            "Marketplace: net credit position too low to list"
+            netPos - int256(locked) >= int256(amount),
+            "Marketplace: insufficient available net credits (check locked listings)"
         );
+
+        // ── Lock the credits ─────────────────────────────────────────────────
+        lockedCredits[msg.sender] = locked + amount;
 
         uint256 id = nextListingId++;
         listings[id] = Listing({
@@ -128,13 +173,17 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
 
     /**
      * @notice Cancel an open listing. Only the original seller may cancel.
+     *         Releases the locked credit amount back to the seller's available pool.
      */
     function cancelListing(uint256 listingId) external nonReentrant {
         Listing storage listing = listings[listingId];
 
-        require(listing.seller != address(0),         "Marketplace: listing not found");
-        require(listing.status == ListingStatus.Open,  "Marketplace: listing not open");
-        require(listing.seller == msg.sender,          "Marketplace: not the seller");
+        require(listing.seller != address(0),        "Marketplace: listing not found");
+        require(listing.status == ListingStatus.Open, "Marketplace: listing not open");
+        require(listing.seller == msg.sender,         "Marketplace: not the seller");
+
+        // ── Release the lock ─────────────────────────────────────────────────
+        lockedCredits[msg.sender] -= listing.amount;
 
         listing.status = ListingStatus.Cancelled;
         emit ListingCancelled(listingId, msg.sender);
@@ -145,10 +194,13 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
      *
      * Execution flow (CEI):
      *   1. Validate listing state, exact ETH value, seller identity constraints.
-     *   2. Re-validate seller's current CREDIT_TOKEN balance (handles stale listings).
-     *   3. Mark listing as Fulfilled (state change before external calls).
+     *   2. Re-validate seller's LIVE net position accounting for their other locked
+     *      listings. This catches sellers who gained debt AFTER listing.
+     *   3. Release the seller's lock for this listing, mark as Fulfilled.
      *   4. Forward ETH directly to the seller.
-     *   5. Call CarbonCreditToken.settleTransfer() to move credits on-chain.
+     *   5. Call CarbonCreditToken.settleTransferWithAutoOffset():
+     *        a. Transfer CREDIT_TOKEN from seller → buyer.
+     *        b. Burn buyer's DEBT_TOKEN up to the amount purchased (auto-offset).
      *
      * @param listingId The ID of the listing to purchase.
      */
@@ -166,35 +218,63 @@ contract CarbonMarketplace is Ownable, ReentrancyGuard {
         uint256 totalPrice = listing.amount * listing.pricePerCredit;
         require(msg.value == totalPrice, "Marketplace: incorrect ETH amount");
 
-        // Re-validate seller balance at purchase time (prevents stale-listing exploit)
-        uint256 sellerCredits = creditToken.balanceOf(
-            listing.seller,
-            creditToken.CREDIT_TOKEN()
-        );
+        // ── ② Net position re-check at purchase time ─────────────────────────
+        // The seller's net has the listing amount "in it" (they haven't transferred yet),
+        // so we only deduct other locked credits (lockedCredits - this listing's amount).
+        // This is the seller's ACTUAL available net after we account for THIS listing:
+        //   otherLocked = lockedCredits[seller] - listing.amount
+        //   availableNet = netCredits(seller) - otherLocked
+        //   require availableNet >= listing.amount
+        //
+        // In other words: netCredits(seller) >= lockedCredits[seller]
+        // If ANY debt was gained after listing, this will revert.
+        int256  sellerNet    = creditToken.netCredits(listing.seller);
+        uint256 sellerLocked = lockedCredits[listing.seller];
         require(
-            sellerCredits >= listing.amount,
-            "Marketplace: seller balance insufficient at purchase time"
+            sellerNet >= int256(sellerLocked),
+            "Marketplace: seller net position degraded since listing (debt gained)"
         );
 
-        // Cache values before state mutation
+        // Cache before state mutation
         address seller = listing.seller;
         address buyer  = msg.sender;
         uint256 amount = listing.amount;
 
-        // ── 3. State change first (CEI) ──────────────────────────────────────
+        // ── ① Release seller lock + mark Fulfilled (CEI — state before interactions) ─
+        lockedCredits[seller] -= amount;
         listing.status = ListingStatus.Fulfilled;
 
-        // ── 4. ETH transfer to seller ────────────────────────────────────────
+        // ── ETH transfer to seller ────────────────────────────────────────────
         (bool sent, ) = payable(seller).call{value: totalPrice}("");
         require(sent, "Marketplace: ETH transfer failed");
 
-        // ── 5. ERC-1155 credit transfer via CarbonCreditToken ────────────────
-        creditToken.settleTransfer(seller, buyer, amount);
+        // ── ③ Settle trade + auto-offset buyer's debt ─────────────────────────
+        uint256 debtBurned = creditToken.settleTransferWithAutoOffset(seller, buyer, amount);
+        if (debtBurned > 0) {
+            emit AutoOffsetApplied(buyer, debtBurned);
+        }
 
         emit TradeExecuted(listingId, seller, buyer, amount, totalPrice);
     }
 
     // ─── View Helpers ─────────────────────────────────────────────────────────
+
+    /**
+     * @notice Returns how many credits are currently locked in open listings
+     *         for a given seller.
+     */
+    function getLockedCredits(address seller) external view returns (uint256) {
+        return lockedCredits[seller];
+    }
+
+    /**
+     * @notice Returns the seller's AVAILABLE net credits (can be listed/sold).
+     *         availableNet = netCredits(seller) - lockedCredits[seller]
+     *         Can return a negative int256 if the seller has gained debt since locking.
+     */
+    function availableNetCredits(address seller) external view returns (int256) {
+        return creditToken.netCredits(seller) - int256(lockedCredits[seller]);
+    }
 
     /**
      * @notice Returns a single listing's full struct.

@@ -196,6 +196,59 @@ contract CarbonCreditToken is ERC1155, AccessControl, ReentrancyGuard {
         );
     }
 
+    /**
+     * @notice Transfer CREDIT_TOKEN from seller to buyer, then automatically
+     *         burn the buyer's DEBT_TOKEN up to the amount of credits received.
+     *
+     * This implements "Auto-Offset After Purchase":
+     *   - If the buyer is a carbon emitter (has DEBT_TOKEN), purchasing credits
+     *     immediately retires some or all of that debt.
+     *   - Burn amount = min(buyer's current DEBT_TOKEN balance, credits purchased).
+     *   - If the buyer has no debt, only the credit transfer happens.
+     *
+     * @param seller  Credit seller (CREDIT_TOKEN transferred away).
+     * @param buyer   Credit buyer (CREDIT_TOKEN received, DEBT_TOKEN burned).
+     * @param amount  Amount of CREDIT_TOKEN to transfer.
+     * @return debtBurned  Amount of DEBT_TOKEN burned from the buyer (0 if none).
+     */
+    function settleTransferWithAutoOffset(
+        address seller,
+        address buyer,
+        uint256 amount
+    ) external nonReentrant onlyRole(MARKETPLACE_ROLE) returns (uint256 debtBurned) {
+        require(seller != address(0), "CCT: zero seller");
+        require(buyer  != address(0), "CCT: zero buyer");
+        require(amount > 0,           "CCT: zero amount");
+        require(
+            balanceOf(seller, CREDIT_TOKEN) >= amount,
+            "CCT: seller insufficient credits"
+        );
+
+        // ── Step 1: Transfer credits seller → buyer ───────────────────────────
+        _safeTransferFrom(seller, buyer, CREDIT_TOKEN, amount, "");
+
+        emit BalanceUpdated(
+            seller,
+            buyer,
+            amount,
+            balanceOf(seller, CREDIT_TOKEN),
+            balanceOf(buyer, CREDIT_TOKEN)
+        );
+
+        // ── Step 2: Auto-offset buyer's debt ─────────────────────────────────
+        // Burn up to `amount` of the buyer's DEBT_TOKEN.
+        // We cap at the buyer's actual debt balance so we never over-burn.
+        uint256 buyerDebt = balanceOf(buyer, DEBT_TOKEN);
+        debtBurned = buyerDebt < amount ? buyerDebt : amount;
+
+        if (debtBurned > 0) {
+            _burn(buyer, DEBT_TOKEN, debtBurned);
+            emit DebtCleared(buyer, debtBurned);
+        }
+
+        return debtBurned;
+    }
+
     // ─── View Functions ───────────────────────────────────────────────────────
 
     /**
