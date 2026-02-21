@@ -15,8 +15,10 @@ import {
     getRecentTransfers,
     computeGlobalStats,
 } from '../utils/blockchainReader'
+import { hashAccountId } from '../utils/hashAccountId'
 
 const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'http://127.0.0.1:8545'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:4000'
 const TOKEN_ADDR = /** @type {`0x${string}`} */ (
     import.meta.env.VITE_CARBON_CREDIT_TOKEN_ADDRESS ?? '0x0'
 )
@@ -81,9 +83,27 @@ export function usePublicCarbonData() {
                     lastBlockMap.set(a, ev.blockNumber)
             }
 
+            // 4.5 Fetch business names via hashed IDs
+            const profileMap = new Map()
+            await Promise.all(
+                addresses.map(async (addr) => {
+                    try {
+                        const hash = await hashAccountId(addr)
+                        const res = await fetch(`${BACKEND_URL}/entity/profile/${hash}`)
+                        if (res.ok) {
+                            const data = await res.json()
+                            if (data.exists) profileMap.set(addr.toLowerCase(), data.businessName)
+                        }
+                    } catch (e) {
+                        // ignore errors to avoid breaking the dashboard if backend is down
+                    }
+                })
+            )
+
             const enriched = balances.map(b => ({
                 ...b,
                 lastBlock: lastBlockMap.get(b.address.toLowerCase()) ?? null,
+                businessName: profileMap.get(b.address.toLowerCase()) ?? null,
             }))
 
             // 5. Global stats

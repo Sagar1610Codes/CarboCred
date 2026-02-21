@@ -9,7 +9,7 @@
 import { useState, useMemo } from 'react'
 
 const COLS = [
-    { key: 'address', label: 'Wallet Address' },
+    { key: 'address', label: 'Firm Identity' },
     { key: 'credits', label: 'Credits' },
     { key: 'debt', label: 'Debt' },
     { key: 'net', label: 'Net Position' },
@@ -124,8 +124,15 @@ export function FirmTable({ firms, loading }) {
                     <tbody>
                         {sorted.map(firm => (
                             <tr key={firm.address} className="ft-row">
-                                <td className="ft-td ft-mono" title={firm.address}>
-                                    {short(firm.address)}
+                                <td className="ft-td" title={firm.address}>
+                                    {firm.businessName ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                            <span style={{ fontWeight: 600, color: '#4ade80', fontSize: '0.9rem' }}>{firm.businessName}</span>
+                                            <span className="ft-mono" style={{ opacity: 0.5, fontSize: '0.75rem' }}>{short(firm.address)}</span>
+                                        </div>
+                                    ) : (
+                                        <span className="ft-mono">{short(firm.address)}</span>
+                                    )}
                                 </td>
                                 <td className="ft-td ft-green">{firm.credits.toString()}</td>
                                 <td className="ft-td ft-red">{firm.debt.toString()}</td>

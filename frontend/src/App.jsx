@@ -6,8 +6,14 @@ import { useEntityPosition } from './hooks/useEntityPosition'
 import { useActiveListings, useListCredits, usePurchaseListing, useCancelListing } from './hooks/useMarketplace'
 import { useLiveFeed } from './hooks/useLiveFeed'
 import { useCarbonAward } from './hooks/useCarbonAward'
+import { useEntityProfile } from './hooks/useEntityProfile'
 import { calculateCredits } from './lib/carbonCalculator'
 import { ListingStatus } from './lib/contracts'
+import { BusinessOnboardingModal } from './components/BusinessOnboardingModal'
+import UserTransactions from './pages/UserTransactions'
+import BusinessAnalytics from './pages/BusinessAnalytics'
+import PurchaseSuccess from './pages/PurchaseSuccess'
+import VerifyTransaction from './pages/VerifyTransaction'
 import './App.css'
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -43,10 +49,15 @@ export default function App() {
   const { cancel, isPending: isCancelling } = useCancelListing()
   const { events, connected: wsConnected } = useLiveFeed()
   const { isSubmitting, result, error: awardError, submitActivity, reset: resetAward } = useCarbonAward()
+  const { accountId, businessName, needsOnboarding, createProfile, loading: profileLoading, error: profileError } = useEntityProfile()
 
   const [listAmount, setListAmount] = useState('')
   const [listPriceEth, setListPriceEth] = useState('')
   const [localListError, setLocalListError] = useState(null)
+
+  // ── View State ─────────────────────────────────────────────────────────────
+  const [currentView, setCurrentView] = useState('marketplace') // 'marketplace' | 'history' | 'analytics' | 'purchase-success' | 'verify'
+  const [lastTxHash, setLastTxHash] = useState(null)
 
   // ── Carbon calculator inputs ───────────────────────────────────────────────
   const [calcInputs, setCalcInputs] = useState({
@@ -92,9 +103,20 @@ export default function App() {
     setTimeout(() => { refetchListings(); refetchPos() }, 3000)
   }
 
-  function handleBuy(listingId, amount, pricePerCredit) {
-    purchase(listingId, amount * pricePerCredit)
-    setTimeout(() => { refetchListings(); refetchPos() }, 3000)
+  async function handleBuy(listingId, amount, pricePerCredit) {
+    try {
+      const txHash = await purchase(listingId, amount * pricePerCredit)
+
+      // If purchase yields a hash, route to the success page to generate the verification QR
+      if (txHash) {
+        setLastTxHash(txHash)
+        setCurrentView('purchase-success')
+      }
+
+      setTimeout(() => { refetchListings(); refetchPos() }, 3000)
+    } catch (e) {
+      console.error("Purchase failed", e);
+    }
   }
 
   function handleCancel(listingId) {
@@ -114,21 +136,60 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <span className="logo">🌿</span>
-          <h1>CarboCred</h1>
+          <div className="brand">
+            <h1>CarboCred</h1>
+          </div>
           <span className="badge">ERC-1155 Marketplace</span>
-          <a href="/public-dashboard.html" className="nav-link">
-            Public Dashboard
-          </a>
+
+          <div className="header-tabs" style={{ display: 'flex', gap: '1rem', marginLeft: '1rem' }}>
+            <button
+              className={`nav-link ${currentView === 'marketplace' ? 'active-tab' : ''}`}
+              onClick={() => setCurrentView('marketplace')}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              Marketplace
+            </button>
+            <button
+              className={`nav-link ${currentView === 'history' ? 'active-tab' : ''}`}
+              onClick={() => setCurrentView('history')}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              My History
+            </button>
+            <button
+              className={`nav-link ${currentView === 'analytics' ? 'active-tab' : ''}`}
+              onClick={() => setCurrentView('analytics')}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              Analytics
+            </button>
+            <button
+              className={`nav-link ${currentView === 'verify' ? 'active-tab' : ''}`}
+              onClick={() => setCurrentView('verify')}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+            >
+              Verify QR
+            </button>
+            <a href="/public-dashboard.html" className="nav-link">
+              Public Dashboard
+            </a>
+          </div>
         </div>
 
         {isConnected ? (
           <div className="header-right">
+            {businessName && (
+              <div className="profile-btn">
+                <span className="profile-icon">👤</span>
+                <span className="entity-name">{businessName}</span>
+              </div>
+            )}
             {isWrongChain && (
               <button className="btn btn-warn" onClick={() => switchChain({ chainId: hardhat.id })}>
                 ⚠ Switch to Hardhat
               </button>
             )}
-            <span className="addr">{shortenAddr(address)}</span>
+            {/* <span className="addr">{shortenAddr(address)}</span> */}
             <button className="btn btn-outline" onClick={() => disconnect()}>Disconnect</button>
           </div>
         ) : (
@@ -139,269 +200,293 @@ export default function App() {
         )}
       </header>
 
-      <div className="grid">
-        {/* ── Left Panel ──────────────────────────────────────────── */}
-        <div className="left-panel">
+      <BusinessOnboardingModal
+        isOpen={needsOnboarding}
+        onSubmit={createProfile}
+        loading={profileLoading}
+        error={profileError}
+        accountId={accountId}
+      />
 
-          {/* My Position */}
-          <section className="card">
-            <h2 className="section-title">My Carbon Position</h2>
-            {!isConnected ? (
-              <p className="muted">Connect wallet to view</p>
-            ) : posLoading ? (
-              <p className="muted">Loading…</p>
-            ) : (
-              <div className="position">
-                <div className="position-row">
-                  <span>🟢 Credits (offsets)</span>
-                  <span className="credit-val">{credits.toString()}</span>
-                </div>
-                <div className="position-row">
-                  <span>🔴 Debt (emissions)</span>
-                  <span className="debt-val">{debt.toString()}</span>
-                </div>
-                <div className="position-row net-row">
-                  <span>Net Position</span>
-                  <NetBadge net={netCredits} />
-                </div>
-              </div>
-            )}
-          </section>
+      {currentView === 'analytics' ? (
+        <BusinessAnalytics />
+      ) : currentView === 'history' ? (
+        <UserTransactions />
+      ) : currentView === 'verify' ? (
+        <VerifyTransaction onReturnHome={() => setCurrentView('marketplace')} />
+      ) : currentView === 'purchase-success' ? (
+        <PurchaseSuccess
+          txHash={lastTxHash}
+          onBackToMarket={() => {
+            setLastTxHash(null);
+            setCurrentView('marketplace');
+          }}
+        />
+      ) : (
+        <div className="grid">
+          {/* ── Left Panel ──────────────────────────────────────────── */}
+          <div className="left-panel">
 
-          {/* Carbon Calculator */}
-          <section className="card">
-            <h2 className="section-title">🌱 Calculate &amp; Earn Credits</h2>
-            {!isConnected ? (
-              <p className="muted">Connect wallet to submit your activity</p>
-            ) : (
-              <form className="form" onSubmit={handleAwardSubmit}>
-
-                <p className="calc-group-label">📤 Emissions (your carbon footprint)</p>
-                <div className="calc-grid">
-                  <div className="form-field">
-                    <label>Energy consumed (kWh)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 250"
-                      value={calcInputs.energyKwh}
-                      onChange={e => setCalc('energyKwh', e.target.value)} />
+            {/* My Position */}
+            <section className="card">
+              <h2 className="section-title">My Carbon Position</h2>
+              {!isConnected ? (
+                <p className="muted">Connect wallet to view</p>
+              ) : posLoading ? (
+                <p className="muted">Loading…</p>
+              ) : (
+                <div className="position">
+                  <div className="position-row">
+                    <span>🟢 Credits (offsets)</span>
+                    <span className="credit-val">{credits.toString()}</span>
                   </div>
-                  <div className="form-field">
-                    <label>Direct CO₂ emitted (kg)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 80"
-                      value={calcInputs.carbonEmittedKg}
-                      onChange={e => setCalc('carbonEmittedKg', e.target.value)} />
+                  <div className="position-row">
+                    <span>🔴 Debt (emissions)</span>
+                    <span className="debt-val">{debt.toString()}</span>
                   </div>
-                  <div className="form-field">
-                    <label>Vehicle distance (km)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 400"
-                      value={calcInputs.vehicleKm}
-                      onChange={e => setCalc('vehicleKm', e.target.value)} />
+                  <div className="position-row net-row">
+                    <span>Net Position</span>
+                    <NetBadge net={netCredits} />
                   </div>
                 </div>
+              )}
+            </section>
 
-                <p className="calc-group-label">📥 Reductions (your offsets)</p>
-                <div className="calc-grid">
-                  <div className="form-field">
-                    <label>Waste recycled (kg)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 30"
-                      value={calcInputs.recycleKg}
-                      onChange={e => setCalc('recycleKg', e.target.value)} />
-                  </div>
-                  <div className="form-field">
-                    <label>Trees planted</label>
-                    <input type="number" min="0" step="1" placeholder="e.g. 5"
-                      value={calcInputs.treesPlanted}
-                      onChange={e => setCalc('treesPlanted', e.target.value)} />
-                  </div>
-                  <div className="form-field">
-                    <label>Clean energy generated (kWh)</label>
-                    <input type="number" min="0" step="any" placeholder="e.g. 150"
-                      value={calcInputs.cleanEnergyKwh}
-                      onChange={e => setCalc('cleanEnergyKwh', e.target.value)} />
-                  </div>
-                </div>
+            {/* Carbon Calculator */}
+            <section className="card">
+              <h2 className="section-title">🌱 Calculate &amp; Earn Credits</h2>
+              {!isConnected ? (
+                <p className="muted">Connect wallet to submit your activity</p>
+              ) : (
+                <form className="form" onSubmit={handleAwardSubmit}>
 
-                {/* Live result preview */}
-                <div className="calc-result">
-                  <div className="calc-result-row">
-                    <span className="muted">📤 Emissions</span>
-                    <span className="debt-val">−{calcResult.emissions.toFixed(2)} pts</span>
-                  </div>
-                  <div className="calc-result-row">
-                    <span className="muted">📥 Reductions</span>
-                    <span className="credit-val">+{calcResult.reductions.toFixed(2)} pts</span>
-                  </div>
-                  <div className="calc-result-row net-row">
-                    <span>Net impact</span>
-                    <span className={`calc-credits ${calcResult.net >= 0 ? 'positive' : 'negative'}`}>
-                      {calcResult.net >= 0 ? '+' : ''}{Math.floor(calcResult.net)}
-                    </span>
-                  </div>
-                  <div className="calc-submit-summary">
-                    {Math.floor(calcResult.reductions) > 0 && (
-                      <span className="credit-val">✦ Mint {Math.floor(calcResult.reductions)} credit tokens</span>
-                    )}
-                    {Math.floor(calcResult.emissions) > 0 && (
-                      <span className="debt-val">✦ Record {Math.floor(calcResult.emissions)} debt tokens</span>
-                    )}
-                  </div>
-                </div>
-
-
-                {/* Feedback */}
-                {awardError && <p className="error-text">{awardError}</p>}
-                {result && (
-                  <div className="calc-success">
-                    <span>✅ Submitted!</span>
-                    {result.awardTx && (
-                      <span>
-                        <span className="credit-val" style={{ fontSize: '0.7rem' }}>+Credits tx: </span>
-                        <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.awardTx}</span>
-                      </span>
-                    )}
-                    {result.debtTx && (
-                      <span>
-                        <span className="debt-val" style={{ fontSize: '0.7rem' }}>+Debt tx: </span>
-                        <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.debtTx}</span>
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-full"
-                  disabled={isSubmitting || (calcResult.emissions === 0 && calcResult.reductions === 0)}
-                  title={(calcResult.emissions === 0 && calcResult.reductions === 0) ? 'Enter at least one value' : undefined}
-                >
-                  {isSubmitting ? 'Submitting…' : 'Submit Activity'}
-                </button>
-              </form>
-            )}
-          </section>
-
-          {/* List Credits Form */}
-          <section className="card">
-            <h2 className="section-title">List Credits for Sale</h2>
-            {!isConnected ? (
-              <p className="muted">Connect wallet to list</p>
-            ) : (
-              <form onSubmit={handleList} className="form">
-                <div className="form-field">
-                  <label>Amount (credits)</label>
-                  <input
-                    type="number" min="1" required
-                    value={listAmount}
-                    onChange={e => setListAmount(e.target.value)}
-                    placeholder="e.g. 100"
-                  />
-                </div>
-                <div className="form-field">
-                  <label>Price per credit (ETH)</label>
-                  <input
-                    type="text" required
-                    value={listPriceEth}
-                    onChange={e => setListPriceEth(e.target.value)}
-                    placeholder="e.g. 0.01"
-                  />
-                </div>
-                {localListError && <p className="error-text">{localListError}</p>}
-                {listError && <p className="error-text">{listError.message?.slice(0, 120)}</p>}
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-full"
-                  disabled={isListing || netCredits < 0n}
-                >
-                  {isListing ? 'Waiting for wallet…' : (netCredits < 0n ? 'Cannot Sell (Net Emitter)' : 'List Credits')}
-                </button>
-              </form>
-            )}
-          </section>
-        </div>
-
-        {/* ── Right Panel ─────────────────────────────────────────── */}
-        <div className="right-panel">
-
-          {/* Active Listings */}
-          <section className="card">
-            <div className="section-header">
-              <h2 className="section-title">Active Listings</h2>
-              <button className="btn-ghost" onClick={() => refetchListings()}>↻ Refresh</button>
-            </div>
-
-            {listLoading ? (
-              <p className="muted">Loading listings…</p>
-            ) : listings.length === 0 ? (
-              <p className="muted">No open listings yet.</p>
-            ) : (
-              <div className="listings">
-                {listings.map(listing => {
-                  const totalEth = formatEther(listing.amount * listing.pricePerCredit)
-                  const isOwn = address?.toLowerCase() === listing.seller.toLowerCase()
-                  return (
-                    <div key={listing.id.toString()} className="listing-row">
-                      <div>
-                        <p className="listing-main">
-                          <span className="credit-val">{listing.amount.toString()}</span>
-                          <span className="muted"> credits @ </span>
-                          <span className="mono">{formatEther(listing.pricePerCredit)} ETH</span>
-                        </p>
-                        <p className="listing-sub">
-                          Seller: {isOwn ? 'You' : shortenAddr(listing.seller)} · Total: {totalEth} ETH
-                        </p>
-                      </div>
-                      <div className="listing-actions">
-                        {!isOwn && isConnected && (
-                          <button
-                            className="btn btn-primary btn-sm"
-                            onClick={() => handleBuy(listing.id, listing.amount, listing.pricePerCredit)}
-                            disabled={isPurchasing}
-                          >
-                            {isPurchasing ? 'Buying…' : `Buy · ${totalEth} ETH`}
-                          </button>
-                        )}
-                        {isOwn && Number(listing.status) === ListingStatus.Open && (
-                          <button
-                            className="btn btn-outline btn-sm"
-                            onClick={() => handleCancel(listing.id)}
-                            disabled={isCancelling}
-                          >
-                            {isCancelling ? 'Cancelling…' : 'Cancel'}
-                          </button>
-                        )}
-                      </div>
+                  <p className="calc-group-label">📤 Emissions (your carbon footprint)</p>
+                  <div className="calc-grid">
+                    <div className="form-field">
+                      <label>Energy consumed (kWh)</label>
+                      <input type="number" min="0" step="any" placeholder="e.g. 250"
+                        value={calcInputs.energyKwh}
+                        onChange={e => setCalc('energyKwh', e.target.value)} />
                     </div>
-                  )
-                })}
-              </div>
-            )}
-            {purchaseError && <p className="error-text">{purchaseError.message?.slice(0, 160)}</p>}
-          </section>
+                    <div className="form-field">
+                      <label>Direct CO₂ emitted (kg)</label>
+                      <input type="number" min="0" step="any" placeholder="e.g. 80"
+                        value={calcInputs.carbonEmittedKg}
+                        onChange={e => setCalc('carbonEmittedKg', e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label>Vehicle distance (km)</label>
+                      <input type="number" min="0" step="any" placeholder="e.g. 400"
+                        value={calcInputs.vehicleKm}
+                        onChange={e => setCalc('vehicleKm', e.target.value)} />
+                    </div>
+                  </div>
 
-          {/* Live Feed */}
-          <section className="card">
-            <div className="section-header">
-              <h2 className="section-title">Live On-Chain Feed</h2>
-              <div className="ws-status">
-                <span className={`ws-dot ${wsConnected ? 'ws-on' : 'ws-off'}`} />
-                <span className="muted">{wsConnected ? 'Connected' : 'Offline'}</span>
+                  <p className="calc-group-label">📥 Reductions (your offsets)</p>
+                  <div className="calc-grid">
+                    <div className="form-field">
+                      <label>Waste recycled (kg)</label>
+                      <input type="number" min="0" step="any" placeholder="e.g. 30"
+                        value={calcInputs.recycleKg}
+                        onChange={e => setCalc('recycleKg', e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label>Trees planted</label>
+                      <input type="number" min="0" step="1" placeholder="e.g. 5"
+                        value={calcInputs.treesPlanted}
+                        onChange={e => setCalc('treesPlanted', e.target.value)} />
+                    </div>
+                    <div className="form-field">
+                      <label>Clean energy generated (kWh)</label>
+                      <input type="number" min="0" step="any" placeholder="e.g. 150"
+                        value={calcInputs.cleanEnergyKwh}
+                        onChange={e => setCalc('cleanEnergyKwh', e.target.value)} />
+                    </div>
+                  </div>
+
+                  {/* Live result preview */}
+                  <div className="calc-result">
+                    <div className="calc-result-row">
+                      <span className="muted">📤 Emissions</span>
+                      <span className="debt-val">−{calcResult.emissions.toFixed(2)} pts</span>
+                    </div>
+                    <div className="calc-result-row">
+                      <span className="muted">📥 Reductions</span>
+                      <span className="credit-val">+{calcResult.reductions.toFixed(2)} pts</span>
+                    </div>
+                    <div className="calc-result-row net-row">
+                      <span>Net impact</span>
+                      <span className={`calc-credits ${calcResult.net >= 0 ? 'positive' : 'negative'}`}>
+                        {calcResult.net >= 0 ? '+' : ''}{Math.floor(calcResult.net)}
+                      </span>
+                    </div>
+                    <div className="calc-submit-summary">
+                      {Math.floor(calcResult.reductions) > 0 && (
+                        <span className="credit-val">✦ Mint {Math.floor(calcResult.reductions)} credit tokens</span>
+                      )}
+                      {Math.floor(calcResult.emissions) > 0 && (
+                        <span className="debt-val">✦ Record {Math.floor(calcResult.emissions)} debt tokens</span>
+                      )}
+                    </div>
+                  </div>
+
+
+                  {/* Feedback */}
+                  {awardError && <p className="error-text">{awardError}</p>}
+                  {result && (
+                    <div className="calc-success">
+                      <span>✅ Submitted!</span>
+                      {result.awardTx && (
+                        <span>
+                          <span className="credit-val" style={{ fontSize: '0.7rem' }}>+Credits tx: </span>
+                          <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.awardTx}</span>
+                        </span>
+                      )}
+                      {result.debtTx && (
+                        <span>
+                          <span className="debt-val" style={{ fontSize: '0.7rem' }}>+Debt tx: </span>
+                          <span className="mono" style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>{result.debtTx}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-full"
+                    disabled={isSubmitting || (calcResult.emissions === 0 && calcResult.reductions === 0)}
+                    title={(calcResult.emissions === 0 && calcResult.reductions === 0) ? 'Enter at least one value' : undefined}
+                  >
+                    {isSubmitting ? 'Submitting…' : 'Submit Activity'}
+                  </button>
+                </form>
+              )}
+            </section>
+
+            {/* List Credits Form */}
+            <section className="card">
+              <h2 className="section-title">List Credits for Sale</h2>
+              {!isConnected ? (
+                <p className="muted">Connect wallet to list</p>
+              ) : (
+                <form onSubmit={handleList} className="form">
+                  <div className="form-field">
+                    <label>Amount (credits)</label>
+                    <input
+                      type="number" min="1" required
+                      value={listAmount}
+                      onChange={e => setListAmount(e.target.value)}
+                      placeholder="e.g. 100"
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label>Price per credit (ETH)</label>
+                    <input
+                      type="text" required
+                      value={listPriceEth}
+                      onChange={e => setListPriceEth(e.target.value)}
+                      placeholder="e.g. 0.01"
+                    />
+                  </div>
+                  {localListError && <p className="error-text">{localListError}</p>}
+                  {listError && <p className="error-text">{listError.message?.slice(0, 120)}</p>}
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-full"
+                    disabled={isListing || netCredits < 0n}
+                  >
+                    {isListing ? 'Waiting for wallet…' : (netCredits < 0n ? 'Cannot Sell (Net Emitter)' : 'List Credits')}
+                  </button>
+                </form>
+              )}
+            </section>
+          </div>
+
+          {/* ── Right Panel ─────────────────────────────────────────── */}
+          <div className="right-panel">
+
+            {/* Active Listings */}
+            <section className="card">
+              <div className="section-header">
+                <h2 className="section-title">Active Listings</h2>
+                <button className="btn-ghost" onClick={() => refetchListings()}>↻ Refresh</button>
               </div>
-            </div>
-            {events.length === 0 ? (
-              <p className="muted">Waiting for events…</p>
-            ) : (
-              <ul className="feed">
-                {events.map((ev, i) => (
-                  <li key={i} className="feed-item">
-                    <span className="feed-type">{ev.type}</span>
-                    {' · '}
-                    <span className="muted">{JSON.stringify(ev).slice(0, 120)}…</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+
+              {listLoading ? (
+                <p className="muted">Loading listings…</p>
+              ) : listings.length === 0 ? (
+                <p className="muted">No open listings yet.</p>
+              ) : (
+                <div className="listings">
+                  {listings.map(listing => {
+                    const totalEth = formatEther(listing.amount * listing.pricePerCredit)
+                    const isOwn = address?.toLowerCase() === listing.seller.toLowerCase()
+                    return (
+                      <div key={listing.id.toString()} className="listing-row">
+                        <div>
+                          <p className="listing-main">
+                            <span className="credit-val">{listing.amount.toString()}</span>
+                            <span className="muted"> credits @ </span>
+                            <span className="mono">{formatEther(listing.pricePerCredit)} ETH</span>
+                          </p>
+                          <p className="listing-sub">
+                            Seller: {isOwn ? 'You' : shortenAddr(listing.seller)} · Total: {totalEth} ETH
+                          </p>
+                        </div>
+                        <div className="listing-actions">
+                          {!isOwn && isConnected && (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              onClick={() => handleBuy(listing.id, listing.amount, listing.pricePerCredit)}
+                              disabled={isPurchasing}
+                            >
+                              {isPurchasing ? 'Buying…' : `Buy · ${totalEth} ETH`}
+                            </button>
+                          )}
+                          {isOwn && Number(listing.status) === ListingStatus.Open && (
+                            <button
+                              className="btn btn-outline btn-sm"
+                              onClick={() => handleCancel(listing.id)}
+                              disabled={isCancelling}
+                            >
+                              {isCancelling ? 'Cancelling…' : 'Cancel'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {purchaseError && <p className="error-text">{purchaseError.message?.slice(0, 160)}</p>}
+            </section>
+
+            {/* Live Feed */}
+            <section className="card">
+              <div className="section-header">
+                <h2 className="section-title">Live On-Chain Feed</h2>
+                <div className="ws-status">
+                  <span className={`ws-dot ${wsConnected ? 'ws-on' : 'ws-off'}`} />
+                  <span className="muted">{wsConnected ? 'Connected' : 'Offline'}</span>
+                </div>
+              </div>
+              {events.length === 0 ? (
+                <p className="muted">Waiting for events…</p>
+              ) : (
+                <ul className="feed">
+                  {events.map((ev, i) => (
+                    <li key={i} className="feed-item">
+                      <span className="feed-type">{ev.type}</span>
+                      {' · '}
+                      <span className="muted">{JSON.stringify(ev).slice(0, 120)}…</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
         </div>
-      </div>
+      )}
     </main>
   )
 }

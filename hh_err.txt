@@ -1,0 +1,8 @@
+[dotenv@17.3.1] injecting env (5) from .env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+[31m[1mError[22m[39m [31m[1mHH8:[22m[39m There's one or more errors in your config file:
+
+  * Invalid account: #0 for network: sepolia - private key too short, expected 32 bytes
+
+To learn more about Hardhat's configuration, please go to https://v2.hardhat.org/config/
+
+For more info go to https://v2.hardhat.org/HH8 or run Hardhat with --show-stack-traces

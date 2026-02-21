@@ -52,11 +52,11 @@ export function useListCredits() {
 // ── Write: purchase listing ───────────────────────────────────────────────
 
 export function usePurchaseListing() {
-    const { writeContract, data: hash, isPending, error } = useWriteContract()
+    const { writeContractAsync, data: hash, isPending, error } = useWriteContract()
     const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
 
-    function purchase(listingId, totalWei) {
-        writeContract({
+    async function purchase(listingId, totalWei) {
+        return await writeContractAsync({
             address: CONTRACT_ADDRESSES.marketplace,
             abi: CARBON_MARKETPLACE_ABI,
             functionName: 'purchaseListing',

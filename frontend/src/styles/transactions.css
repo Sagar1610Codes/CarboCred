@@ -1,0 +1,346 @@
+/* frontend/src/styles/transactions.css */
+
+.tx-page {
+    padding: 1.5rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+.tx-header {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+@media (min-width: 768px) {
+    .tx-header {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+}
+
+.tx-title {
+    font-size: 1.875rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #fff;
+    margin: 0 0 0.5rem 0;
+}
+
+.tx-subtitle {
+    color: #94a3b8;
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+.tx-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.tx-refresh-btn {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #475569;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+
+.tx-refresh-btn:hover:not(:disabled) {
+    background: #334155;
+    color: #fff;
+}
+
+.tx-refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tx-sync-msg {
+    font-size: 0.75rem;
+    color: #64748b;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.tx-error {
+    background: rgba(127, 29, 29, 0.5);
+    border: 1px solid #991b1b;
+    color: #fecaca;
+    padding: 1rem;
+    border-radius: 0.75rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+}
+
+/* ── Summary Grid ──────────────────────────── */
+
+.tx-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+@media (min-width: 1024px) {
+    .tx-summary-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+.tx-summary-card {
+    padding: 1.25rem;
+    border-radius: 0.75rem;
+    border: 1px solid rgba(51, 65, 85, 0.5);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.tx-summary-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 0.75rem;
+}
+
+.tx-summary-card-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.tx-skeleton {
+    height: 2rem;
+    background: rgba(51, 65, 85, 0.5);
+    border-radius: 0.25rem;
+    width: 6rem;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ── Table Section ─────────────────────────── */
+
+.tx-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.tx-section-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+}
+
+.tx-count-badge {
+    font-size: 0.875rem;
+    font-weight: 400;
+    color: #94a3b8;
+    background: #1e293b;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    border: 1px solid #334155;
+}
+
+.tx-table-container {
+    background: #1e293b;
+    border-radius: 0.75rem;
+    border: 1px solid #334155;
+    overflow: hidden;
+}
+
+.tx-table-scroll {
+    overflow-x: auto;
+}
+
+.tx-table {
+    width: 100%;
+    text-align: left;
+    border-collapse: collapse;
+}
+
+.tx-th {
+    padding: 1rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #94a3b8;
+    background: rgba(15, 23, 42, 0.5);
+    border-bottom: 1px solid #334155;
+    cursor: default;
+}
+
+.tx-th.sortable {
+    cursor: pointer;
+    transition: color 0.2s;
+}
+
+.tx-th.sortable:hover {
+    color: #fff;
+}
+
+.tx-tr {
+    transition: background-color 0.2s;
+}
+
+.tx-tr:hover {
+    background: rgba(51, 65, 85, 0.2);
+}
+
+.tx-td {
+    padding: 1rem;
+    font-size: 0.875rem;
+    color: #cbd5e1;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+.tx-table tbody tr:last-child .tx-td {
+    border-bottom: none;
+}
+
+/* ── Badges ────────────────────────────────── */
+
+.tx-badge {
+    display: inline-block;
+    padding: 0.25rem 0.6rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.tx-badge-RECEIVED {
+    background: rgba(30, 58, 138, 0.5);
+    color: #93c5fd;
+    border-color: rgba(29, 78, 216, 0.5);
+}
+
+.tx-badge-SENT {
+    background: rgba(124, 45, 18, 0.5);
+    color: #fdba74;
+    border-color: rgba(194, 65, 12, 0.5);
+}
+
+.tx-badge-MINT {
+    background: rgba(20, 83, 45, 0.5);
+    color: #86efac;
+    border-color: rgba(21, 128, 61, 0.5);
+}
+
+.tx-badge-RETIRE {
+    background: rgba(88, 28, 135, 0.5);
+    color: #d8b4fe;
+    border-color: rgba(126, 34, 206, 0.5);
+}
+
+.tx-badge-TRADE {
+    background: rgba(113, 63, 18, 0.5);
+    color: #fcd34d;
+    border-color: rgba(161, 98, 7, 0.5);
+}
+
+.tx-badge-DEFAULT {
+    background: #1e293b;
+    color: #cbd5e1;
+    border-color: #475569;
+}
+
+/* ── Links & Hashes ───────────────────────── */
+
+.tx-hash-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tx-link {
+    color: #94a3b8;
+    text-decoration: none;
+    transition: color 0.2s;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.tx-link:hover {
+    color: #60a5fa;
+}
+
+.tx-copy-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+    font-size: 0.875rem;
+}
+
+.tx-copy-btn:hover {
+    opacity: 1;
+    color: #fff;
+}
+
+.tx-mono-sm {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.8rem;
+}
+
+/* ── Edge States ──────────────────────────── */
+
+.tx-empty {
+    padding: 4rem 2rem;
+    text-align: center;
+    color: #94a3b8;
+}
+
+.tx-empty-icon {
+    font-size: 3rem;
+    display: block;
+    margin-bottom: 1rem;
+}
+
+.tx-table-footer {
+    padding: 1rem;
+    border-top: 1px solid #334155;
+    background: rgba(15, 23, 42, 0.3);
+    text-align: center;
+    font-size: 0.75rem;
+    color: #64748b;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}

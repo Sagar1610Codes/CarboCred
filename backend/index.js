@@ -28,12 +28,19 @@ const { WebSocketServer } = require("ws");
 const { startListeners, stopListeners } = require("./listener");
 const { awardCredits, recordDebt, clearDebt, getNetCredits } = require("./signer");
 const { ethers } = require("ethers");
+const mongoose = require("mongoose");
 
 const PORT = process.env.PORT || 4000;
 
 // ── Express HTTP server ───────────────────────────────────────────────────
 const app = express();
 const server = http.createServer(app);
+
+// ── Database ──────────────────────────────────────────────────────────────
+mongoose.connect(process.env.MONGO_URI)
+    .then(() => console.log("[DB] Connected to MongoDB"))
+    .catch(err => console.error("[DB] Connection error:", err.message));
+
 app.use(express.json());
 
 // Allow frontend dev server (localhost:3000) during development
@@ -184,6 +191,9 @@ app.post("/clear-debt", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ── Identity Routes ───────────────────────────────────────────────────────
+app.use("/entity", require("./src/routes/entityProfile.routes"));
 
 // ── Health check ──────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
