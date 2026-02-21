@@ -20,6 +20,12 @@ const EntityProfileSchema = new mongoose.Schema({
         trim: true,
         minlength: 2,
         maxlength: 100,
+    },
+    walletAddress: {
+        type: String,
+        trim: true,
+        lowercase: true,    // store normalised for lookups
+        index: true,
     }
 }, {
     timestamps: true // Adds createdAt and updatedAt automatically

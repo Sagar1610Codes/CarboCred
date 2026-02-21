@@ -44,6 +44,9 @@ contract CarbonCreditToken is ERC1155, AccessControl, ReentrancyGuard {
     bytes32 public constant BACKEND_ROLE     = keccak256("BACKEND_ROLE");
     bytes32 public constant MARKETPLACE_ROLE = keccak256("MARKETPLACE_ROLE");
 
+    /// @notice Only the Government Authority may mint carbon credits.
+    bytes32 public constant GOVERNMENT_ROLE  = keccak256("GOVERNMENT_ROLE");
+
     // ─── Metadata ─────────────────────────────────────────────────────────────
 
     string public name   = "Carbon Credit Token";
@@ -102,7 +105,7 @@ contract CarbonCreditToken is ERC1155, AccessControl, ReentrancyGuard {
         address entity,
         uint256 amount,
         string calldata reason
-    ) external onlyRole(BACKEND_ROLE) {
+    ) external onlyRole(GOVERNMENT_ROLE) {
         require(entity != address(0), "CCT: zero address");
         require(amount > 0,           "CCT: zero amount");
         _mint(entity, CREDIT_TOKEN, amount, "");

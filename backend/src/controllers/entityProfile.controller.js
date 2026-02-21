@@ -20,7 +20,11 @@ exports.getProfile = async (req, res) => {
         const profile = await EntityProfile.findOne({ accountId });
 
         if (profile) {
-            return res.json({ exists: true, businessName: profile.businessName });
+            return res.json({
+                exists: true,
+                businessName: profile.businessName,
+                walletAddress: profile.walletAddress || null,
+            });
         } else {
             return res.json({ exists: false });
         }
@@ -31,12 +35,30 @@ exports.getProfile = async (req, res) => {
 };
 
 /**
+ * List all registered entity profiles (for Government Authority selector).
+ * GET /entity/profiles
+ */
+exports.listProfiles = async (req, res) => {
+    try {
+        const profiles = await EntityProfile.find(
+            {},  // return all profiles regardless of walletAddress
+            'accountId businessName walletAddress -_id'
+        ).sort({ businessName: 1 });
+
+        res.json({ profiles });
+    } catch (err) {
+        console.error('[API] GET /entity/profiles error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+/**
  * Upsert profile.
  * POST /entity/profile
  */
 exports.upsertProfile = async (req, res) => {
     try {
-        const { accountId, businessName } = req.body;
+        const { accountId, businessName, walletAddress } = req.body;
 
         if (!accountId || !businessName) {
             return res.status(400).json({ error: 'accountId and businessName required' });
@@ -47,9 +69,14 @@ exports.upsertProfile = async (req, res) => {
             return res.status(400).json({ error: 'Invalid accountId format' });
         }
 
+        const updateFields = { businessName };
+        if (walletAddress) {
+            updateFields.walletAddress = walletAddress.toLowerCase();
+        }
+
         const profile = await EntityProfile.findOneAndUpdate(
             { accountId },
-            { businessName },
+            updateFields,
             { new: true, upsert: true, runValidators: true }
         );
 

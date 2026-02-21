@@ -67,7 +67,8 @@ $bEnv += "BACKEND_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efc
 $bEnv += "CARBON_CREDIT_TOKEN_ADDRESS=$tok`n"
 $bEnv += "MARKETPLACE_ADDRESS=$mkt`n"
 $bEnv += "PORT=4000`n"
-$bEnv += "MONGO_URI=mongodb+srv://kasshan:Kasshan%402006@cluster0.vpcmj3u.mongodb.net/carbocred"
+$bEnv += "MONGO_URI=mongodb+srv://kasshan:Kasshan%402006@cluster0.vpcmj3u.mongodb.net/carbocred`n"
+$bEnv += "GOVERNMENT_WALLET=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 Set-Content -Path "$ROOT\backend\.env" -Value $bEnv
 $fEnv  = "VITE_CARBON_CREDIT_TOKEN_ADDRESS=$tok`n"
 $fEnv += "VITE_MARKETPLACE_ADDRESS=$mkt`n"

@@ -22,6 +22,11 @@ async function main() {
     const BACKEND_ROLE = await creditToken.BACKEND_ROLE();
     await (await creditToken.grantRole(BACKEND_ROLE, deployer.address)).wait();
 
+    // Grant GOVERNMENT_ROLE to deployer (Account #0 = Government Authority on local Hardhat)
+    const GOVERNMENT_ROLE = await creditToken.GOVERNMENT_ROLE();
+    await (await creditToken.grantRole(GOVERNMENT_ROLE, deployer.address)).wait();
+    console.error(`[Deploy] GOVERNMENT_ROLE granted to ${deployer.address}`);
+
     const result = {
         deployer: deployer.address,
         tokenAddress,

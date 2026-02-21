@@ -2,16 +2,21 @@
  * hooks/useCarbonAward.js
  *
  * Submits both sides of the carbon activity form:
- *   reductions → POST /award  (mints credit tokens)
+ *   reductions → POST /award  (mints credit tokens) — GOVERNMENT WALLET ONLY
  *   emissions  → POST /debt   (records debt tokens)
  *
- * Each fires only when its amount > 0.
- * The entity address MUST come from MetaMask — never a manual field.
+ * Security Layer 3 (Frontend):
+ *   Before calling /award the hook requests a MetaMask signature over the
+ *   canonical authorization message. The backend verifies this signature
+ *   against GOVERNMENT_WALLET before processing the mint.
  */
 
 import { useState } from 'react'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:4000'
+
+/** Must match backend/utils/verifyGovernment.js AUTH_MESSAGE exactly */
+export const AUTH_MESSAGE = 'Authorize carbon credit award'
 
 async function postJSON(path, body) {
     const res = await fetch(`${BACKEND_URL}${path}`, {
@@ -24,16 +29,14 @@ async function postJSON(path, body) {
     return json
 }
 
-export function useCarbonAward() {
+/**
+ * @param {Function} signMessageAsync  wagmi's signMessageAsync({ message }) — injected by caller
+ */
+export function useCarbonAward(signMessageAsync) {
     const [isSubmitting, setIsSubmitting] = useState(false)
-    const [result, setResult] = useState(null)   // { awardTx?, debtTx? }
+    const [result, setResult] = useState(null)
     const [error, setError] = useState(null)
 
-    /**
-     * @param {string} walletAddress  from useAccount().address
-     * @param {number} rawEmissions   raw float kg CO₂ from calculator
-     * @param {number} rawReductions  raw float offset points from calculator
-     */
     async function submitActivity(walletAddress, rawEmissions, rawReductions) {
         if (!walletAddress) { setError('Wallet not connected.'); return }
 
@@ -50,12 +53,35 @@ export function useCarbonAward() {
         setError(null)
 
         try {
+            // ── Security Layer 3: Obtain government wallet signature ───────────
+            let signature = null
+            if (creditAmount > 0) {
+                if (!signMessageAsync) {
+                    throw new Error('Wallet signing function not available.')
+                }
+                try {
+                    signature = await signMessageAsync({ message: AUTH_MESSAGE })
+                } catch {
+                    throw new Error('Signature rejected. You must sign to authorize credit minting.')
+                }
+            }
+            // ── End Security Layer 3 ──────────────────────────────────────────
+
             const [awardRes, debtRes] = await Promise.allSettled([
                 creditAmount > 0
-                    ? postJSON('/award', { entity: walletAddress, amount: creditAmount, reason: 'Auto-calculated carbon offset' })
+                    ? postJSON('/award', {
+                        entity: walletAddress,
+                        amount: creditAmount,
+                        reason: 'Auto-calculated carbon offset',
+                        signature,
+                    })
                     : Promise.resolve(null),
                 debtAmount > 0
-                    ? postJSON('/debt', { entity: walletAddress, amount: debtAmount, reason: 'Auto-calculated carbon emissions' })
+                    ? postJSON('/debt', {
+                        entity: walletAddress,
+                        amount: debtAmount,
+                        reason: 'Auto-calculated carbon emissions',
+                    })
                     : Promise.resolve(null),
             ])
 

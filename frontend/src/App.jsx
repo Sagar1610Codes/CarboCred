@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain, useConnectors } from 'wagmi'
+import { useState, useMemo, useEffect } from 'react'
+import { useAccount, useConnect, useDisconnect, useChainId, useSwitchChain, useConnectors, useSignMessage } from 'wagmi'
 import { hardhat } from 'wagmi/chains'
 import { formatEther } from 'viem'
 import { useEntityPosition } from './hooks/useEntityPosition'
@@ -15,6 +15,10 @@ import BusinessAnalytics from './pages/BusinessAnalytics'
 import PurchaseSuccess from './pages/PurchaseSuccess'
 import VerifyTransaction from './pages/VerifyTransaction'
 import './App.css'
+
+// ── Government Authority ───────────────────────────────────────────────────
+// Layer 3: Frontend access gate. Smart contract + backend enforce independently.
+const GOVERNMENT_WALLET = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266' // lowercase
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,7 +44,11 @@ export default function App() {
   const chainId = useChainId()
   const { switchChain } = useSwitchChain()
   const connectors = useConnectors()
+  const { signMessageAsync } = useSignMessage()
   const isWrongChain = isConnected && chainId !== hardhat.id
+
+  // True only when GOVERNMENT_WALLET is connected (case-insensitive)
+  const isGovernment = isConnected && address?.toLowerCase() === GOVERNMENT_WALLET
 
   const { credits, debt, netCredits, isLoading: posLoading, refetch: refetchPos } = useEntityPosition()
   const { listings, isLoading: listLoading, refetch: refetchListings } = useActiveListings()
@@ -48,12 +56,28 @@ export default function App() {
   const { purchase, isPending: isPurchasing, error: purchaseError } = usePurchaseListing()
   const { cancel, isPending: isCancelling } = useCancelListing()
   const { events, connected: wsConnected } = useLiveFeed()
-  const { isSubmitting, result, error: awardError, submitActivity, reset: resetAward } = useCarbonAward()
+  const { isSubmitting, result, error: awardError, submitActivity, reset: resetAward } = useCarbonAward(signMessageAsync)
   const { accountId, businessName, needsOnboarding, createProfile, loading: profileLoading, error: profileError } = useEntityProfile()
 
   const [listAmount, setListAmount] = useState('')
   const [listPriceEth, setListPriceEth] = useState('')
   const [localListError, setLocalListError] = useState(null)
+
+  // ── Government: registered entity list for award target picker ────────────
+  const [entityList, setEntityList] = useState([])         // [{ businessName, walletAddress, accountId }]
+  const [targetEntity, setTargetEntity] = useState(null)  // currently selected award recipient
+
+  useEffect(() => {
+    if (!isGovernment) { setEntityList([]); setTargetEntity(null); return; }
+    const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000'
+    fetch(`${BACKEND}/entity/profiles`)
+      .then(r => r.ok ? r.json() : { profiles: [] })
+      .then(({ profiles }) => {
+        setEntityList(profiles || [])
+        if (profiles?.length) setTargetEntity(profiles[0])
+      })
+      .catch(() => setEntityList([]))
+  }, [isGovernment])
 
   // ── View State ─────────────────────────────────────────────────────────────
   const [currentView, setCurrentView] = useState('marketplace') // 'marketplace' | 'history' | 'analytics' | 'purchase-success' | 'verify'
@@ -126,7 +150,14 @@ export default function App() {
 
   async function handleAwardSubmit(e) {
     e.preventDefault()
-    await submitActivity(address, calcResult.emissions, calcResult.reductions)
+    // Layer 3 guard: block non-government wallets at UI level
+    if (!isGovernment) {
+      alert('Access Restricted: Only the Government Authority wallet may award credits.')
+      return
+    }
+    // Use the selected target entity's wallet, not the government's own wallet
+    const recipientAddress = targetEntity?.walletAddress || targetEntity?._manualWallet || address
+    await submitActivity(recipientAddress, calcResult.emissions, calcResult.reductions)
     setTimeout(() => refetchPos(), 3000)
   }
 
@@ -141,39 +172,46 @@ export default function App() {
           </div>
           <span className="badge">ERC-1155 Marketplace</span>
 
-          <div className="header-tabs" style={{ display: 'flex', gap: '1rem', marginLeft: '1rem' }}>
-            <button
-              className={`nav-link ${currentView === 'marketplace' ? 'active-tab' : ''}`}
-              onClick={() => setCurrentView('marketplace')}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-              Marketplace
-            </button>
-            <button
-              className={`nav-link ${currentView === 'history' ? 'active-tab' : ''}`}
-              onClick={() => setCurrentView('history')}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-              My History
-            </button>
-            <button
-              className={`nav-link ${currentView === 'analytics' ? 'active-tab' : ''}`}
-              onClick={() => setCurrentView('analytics')}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-              Analytics
-            </button>
-            <button
-              className={`nav-link ${currentView === 'verify' ? 'active-tab' : ''}`}
-              onClick={() => setCurrentView('verify')}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
-            >
-              Verify QR
-            </button>
-            <a href="/public-dashboard.html" className="nav-link">
-              Public Dashboard
-            </a>
-          </div>
+          {!isGovernment && (
+            <div className="header-tabs" style={{ display: 'flex', gap: '1rem', marginLeft: '1rem' }}>
+              <button
+                className={`nav-link ${currentView === 'marketplace' ? 'active-tab' : ''}`}
+                onClick={() => setCurrentView('marketplace')}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Marketplace
+              </button>
+              <button
+                className={`nav-link ${currentView === 'history' ? 'active-tab' : ''}`}
+                onClick={() => setCurrentView('history')}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                My History
+              </button>
+              <button
+                className={`nav-link ${currentView === 'verify' ? 'active-tab' : ''}`}
+                onClick={() => setCurrentView('verify')}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Verify QR
+              </button>
+              <a
+                href="/public-dashboard.html"
+                style={{
+                  color: '#94a3b8',
+                  textDecoration: 'none',
+                  fontSize: '0.95rem',
+                  fontWeight: 500,
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+                onMouseOver={e => e.target.style.color = '#fff'}
+                onMouseOut={e => e.target.style.color = '#94a3b8'}
+              >
+                Public Dashboard
+              </a>
+            </div>
+          )}
         </div>
 
         {isConnected ? (
@@ -228,37 +266,86 @@ export default function App() {
           <div className="left-panel">
 
             {/* My Position */}
-            <section className="card">
-              <h2 className="section-title">My Carbon Position</h2>
-              {!isConnected ? (
-                <p className="muted">Connect wallet to view</p>
-              ) : posLoading ? (
-                <p className="muted">Loading…</p>
-              ) : (
-                <div className="position">
-                  <div className="position-row">
-                    <span>🟢 Credits (offsets)</span>
-                    <span className="credit-val">{credits.toString()}</span>
+            {/* My Position */}
+            {!isGovernment && (
+              <section className="card">
+                <h2 className="section-title">My Carbon Position</h2>
+                {!isConnected ? (
+                  <p className="muted">Connect wallet to view</p>
+                ) : posLoading ? (
+                  <p className="muted">Loading…</p>
+                ) : (
+                  <div className="position">
+                    <div className="position-row">
+                      <span>🟢 Credits (offsets)</span>
+                      <span className="credit-val">{credits.toString()}</span>
+                    </div>
+                    <div className="position-row">
+                      <span>🔴 Debt (emissions)</span>
+                      <span className="debt-val">{debt.toString()}</span>
+                    </div>
+                    <div className="position-row net-row">
+                      <span>Net Position</span>
+                      <NetBadge net={netCredits} />
+                    </div>
                   </div>
-                  <div className="position-row">
-                    <span>🔴 Debt (emissions)</span>
-                    <span className="debt-val">{debt.toString()}</span>
-                  </div>
-                  <div className="position-row net-row">
-                    <span>Net Position</span>
-                    <NetBadge net={netCredits} />
-                  </div>
-                </div>
-              )}
-            </section>
+                )}
+              </section>
+            )}
 
             {/* Carbon Calculator */}
             <section className="card">
-              <h2 className="section-title">🌱 Calculate &amp; Earn Credits</h2>
+              <h2 className="section-title">🌱 Calculate Carbon Footprint</h2>
+
+              {/* ── Security Layer 3: Government-only gate ── */}
+              {isGovernment && (
+                <div style={{
+                  background: 'rgba(34,197,94,0.1)',
+                  border: '1px solid rgba(34,197,94,0.3)',
+                  borderRadius: '0.5rem',
+                  padding: '0.6rem 1rem',
+                  marginBottom: '0.75rem',
+                  fontSize: '0.8rem',
+                  color: '#4ade80',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}>
+                  🏛️ <strong>Government Authority</strong> — You may issue carbon credits.
+                </div>
+              )}
+              {/* ── End Security Gate ── */}
+
               {!isConnected ? (
                 <p className="muted">Connect wallet to submit your activity</p>
               ) : (
                 <form className="form" onSubmit={handleAwardSubmit}>
+
+                  {/* ── Government: Target Entity Selector ── */}
+                  {isGovernment && (
+                    <div className="form-field" style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        🏢 Award Credits To
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Recipient Wallet Address (0x...)"
+                        style={{
+                          width: '100%',
+                          background: '#1e293b',
+                          color: '#e2e8f0',
+                          border: '1px solid #334155',
+                          borderRadius: '0.5rem',
+                          padding: '0.6rem 0.75rem',
+                          fontSize: '0.9rem',
+                          marginTop: '0.3rem',
+                          fontFamily: 'monospace',
+                        }}
+                        value={targetEntity?._manualWallet || ''}
+                        onChange={e => setTargetEntity({ _manualWallet: e.target.value.trim() })}
+                      />
+                    </div>
+                  )}
 
                   <p className="calc-group-label">📤 Emissions (your carbon footprint)</p>
                   <div className="calc-grid">
@@ -351,140 +438,148 @@ export default function App() {
                     </div>
                   )}
 
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-full"
-                    disabled={isSubmitting || (calcResult.emissions === 0 && calcResult.reductions === 0)}
-                    title={(calcResult.emissions === 0 && calcResult.reductions === 0) ? 'Enter at least one value' : undefined}
-                  >
-                    {isSubmitting ? 'Submitting…' : 'Submit Activity'}
-                  </button>
+                  {isGovernment && (
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-full"
+                      disabled={isSubmitting || (calcResult.emissions === 0 && calcResult.reductions === 0)}
+                      title={(calcResult.emissions === 0 && calcResult.reductions === 0) ? 'Enter at least one value' : undefined}
+                    >
+                      {isSubmitting ? 'Submitting…' : 'Submit Activity'}
+                    </button>
+                  )}
                 </form>
               )}
             </section>
 
             {/* List Credits Form */}
-            <section className="card">
-              <h2 className="section-title">List Credits for Sale</h2>
-              {!isConnected ? (
-                <p className="muted">Connect wallet to list</p>
-              ) : (
-                <form onSubmit={handleList} className="form">
-                  <div className="form-field">
-                    <label>Amount (credits)</label>
-                    <input
-                      type="number" min="1" required
-                      value={listAmount}
-                      onChange={e => setListAmount(e.target.value)}
-                      placeholder="e.g. 100"
-                    />
-                  </div>
-                  <div className="form-field">
-                    <label>Price per credit (ETH)</label>
-                    <input
-                      type="text" required
-                      value={listPriceEth}
-                      onChange={e => setListPriceEth(e.target.value)}
-                      placeholder="e.g. 0.01"
-                    />
-                  </div>
-                  {localListError && <p className="error-text">{localListError}</p>}
-                  {listError && <p className="error-text">{listError.message?.slice(0, 120)}</p>}
-                  <button
-                    type="submit"
-                    className="btn btn-primary btn-full"
-                    disabled={isListing || netCredits < 0n}
-                  >
-                    {isListing ? 'Waiting for wallet…' : (netCredits < 0n ? 'Cannot Sell (Net Emitter)' : 'List Credits')}
-                  </button>
-                </form>
-              )}
-            </section>
+            {/* List Credits Form */}
+            {!isGovernment && (
+              <section className="card">
+                <h2 className="section-title">List Credits for Sale</h2>
+                {!isConnected ? (
+                  <p className="muted">Connect wallet to list</p>
+                ) : (
+                  <form onSubmit={handleList} className="form">
+                    <div className="form-field">
+                      <label>Amount (credits)</label>
+                      <input
+                        type="number" min="1" required
+                        value={listAmount}
+                        onChange={e => setListAmount(e.target.value)}
+                        placeholder="e.g. 100"
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label>Price per credit (ETH)</label>
+                      <input
+                        type="text" required
+                        value={listPriceEth}
+                        onChange={e => setListPriceEth(e.target.value)}
+                        placeholder="e.g. 0.01"
+                      />
+                    </div>
+                    {localListError && <p className="error-text">{localListError}</p>}
+                    {listError && <p className="error-text">{listError.message?.slice(0, 120)}</p>}
+                    <button
+                      type="submit"
+                      className="btn btn-primary btn-full"
+                      disabled={isListing || netCredits < 0n}
+                    >
+                      {isListing ? 'Waiting for wallet…' : (netCredits < 0n ? 'Cannot Sell (Net Emitter)' : 'List Credits')}
+                    </button>
+                  </form>
+                )}
+              </section>
+            )}
           </div>
 
           {/* ── Right Panel ─────────────────────────────────────────── */}
-          <div className="right-panel">
+          {/* ── Right Panel ─────────────────────────────────────────── */}
+          {!isGovernment && (
+            <div className="right-panel">
 
-            {/* Active Listings */}
-            <section className="card">
-              <div className="section-header">
-                <h2 className="section-title">Active Listings</h2>
-                <button className="btn-ghost" onClick={() => refetchListings()}>↻ Refresh</button>
-              </div>
-
-              {listLoading ? (
-                <p className="muted">Loading listings…</p>
-              ) : listings.length === 0 ? (
-                <p className="muted">No open listings yet.</p>
-              ) : (
-                <div className="listings">
-                  {listings.map(listing => {
-                    const totalEth = formatEther(listing.amount * listing.pricePerCredit)
-                    const isOwn = address?.toLowerCase() === listing.seller.toLowerCase()
-                    return (
-                      <div key={listing.id.toString()} className="listing-row">
-                        <div>
-                          <p className="listing-main">
-                            <span className="credit-val">{listing.amount.toString()}</span>
-                            <span className="muted"> credits @ </span>
-                            <span className="mono">{formatEther(listing.pricePerCredit)} ETH</span>
-                          </p>
-                          <p className="listing-sub">
-                            Seller: {isOwn ? 'You' : shortenAddr(listing.seller)} · Total: {totalEth} ETH
-                          </p>
-                        </div>
-                        <div className="listing-actions">
-                          {!isOwn && isConnected && (
-                            <button
-                              className="btn btn-primary btn-sm"
-                              onClick={() => handleBuy(listing.id, listing.amount, listing.pricePerCredit)}
-                              disabled={isPurchasing}
-                            >
-                              {isPurchasing ? 'Buying…' : `Buy · ${totalEth} ETH`}
-                            </button>
-                          )}
-                          {isOwn && Number(listing.status) === ListingStatus.Open && (
-                            <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() => handleCancel(listing.id)}
-                              disabled={isCancelling}
-                            >
-                              {isCancelling ? 'Cancelling…' : 'Cancel'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+              {/* Active Listings */}
+              <section className="card">
+                <div className="section-header">
+                  <h2 className="section-title">Active Listings</h2>
+                  <button className="btn-ghost" onClick={() => refetchListings()}>↻ Refresh</button>
                 </div>
-              )}
-              {purchaseError && <p className="error-text">{purchaseError.message?.slice(0, 160)}</p>}
-            </section>
 
-            {/* Live Feed */}
-            <section className="card">
-              <div className="section-header">
-                <h2 className="section-title">Live On-Chain Feed</h2>
-                <div className="ws-status">
-                  <span className={`ws-dot ${wsConnected ? 'ws-on' : 'ws-off'}`} />
-                  <span className="muted">{wsConnected ? 'Connected' : 'Offline'}</span>
+                {listLoading ? (
+                  <p className="muted">Loading listings…</p>
+                ) : listings.length === 0 ? (
+                  <p className="muted">No open listings yet.</p>
+                ) : (
+                  <div className="listings">
+                    {listings.map(listing => {
+                      const totalEth = formatEther(listing.amount * listing.pricePerCredit)
+                      const isOwn = address?.toLowerCase() === listing.seller.toLowerCase()
+                      return (
+                        <div key={listing.id.toString()} className="listing-row">
+                          <div>
+                            <p className="listing-main">
+                              <span className="credit-val">{listing.amount.toString()}</span>
+                              <span className="muted"> credits @ </span>
+                              <span className="mono">{formatEther(listing.pricePerCredit)} ETH</span>
+                            </p>
+                            <p className="listing-sub">
+                              Seller: {isOwn ? 'You' : shortenAddr(listing.seller)} · Total: {totalEth} ETH
+                            </p>
+                          </div>
+                          <div className="listing-actions">
+                            {!isOwn && isConnected && (
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleBuy(listing.id, listing.amount, listing.pricePerCredit)}
+                                disabled={isPurchasing}
+                              >
+                                {isPurchasing ? 'Buying…' : `Buy · ${totalEth} ETH`}
+                              </button>
+                            )}
+                            {isOwn && Number(listing.status) === ListingStatus.Open && (
+                              <button
+                                className="btn btn-outline btn-sm"
+                                onClick={() => handleCancel(listing.id)}
+                                disabled={isCancelling}
+                              >
+                                {isCancelling ? 'Cancelling…' : 'Cancel'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                {purchaseError && <p className="error-text">{purchaseError.message?.slice(0, 160)}</p>}
+              </section>
+
+              {/* Live Feed */}
+              <section className="card">
+                <div className="section-header">
+                  <h2 className="section-title">Live On-Chain Feed</h2>
+                  <div className="ws-status">
+                    <span className={`ws-dot ${wsConnected ? 'ws-on' : 'ws-off'}`} />
+                    <span className="muted">{wsConnected ? 'Connected' : 'Offline'}</span>
+                  </div>
                 </div>
-              </div>
-              {events.length === 0 ? (
-                <p className="muted">Waiting for events…</p>
-              ) : (
-                <ul className="feed">
-                  {events.map((ev, i) => (
-                    <li key={i} className="feed-item">
-                      <span className="feed-type">{ev.type}</span>
-                      {' · '}
-                      <span className="muted">{JSON.stringify(ev).slice(0, 120)}…</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </div>
+                {events.length === 0 ? (
+                  <p className="muted">Waiting for events…</p>
+                ) : (
+                  <ul className="feed">
+                    {events.map((ev, i) => (
+                      <li key={i} className="feed-item">
+                        <span className="feed-type">{ev.type}</span>
+                        {' · '}
+                        <span className="muted">{JSON.stringify(ev).slice(0, 120)}…</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          )}
         </div>
       )}
     </main>

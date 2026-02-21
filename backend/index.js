@@ -29,6 +29,8 @@ const { startListeners, stopListeners } = require("./listener");
 const { awardCredits, recordDebt, clearDebt, getNetCredits } = require("./signer");
 const { ethers } = require("ethers");
 const mongoose = require("mongoose");
+const entityProfileRoutes = require("./src/routes/entityProfile.routes");
+const { verifyGovernmentSignature, isBackendTheGovernment, GOVERNMENT_WALLET } = require("./utils/verifyGovernment");
 
 const PORT = process.env.PORT || 4000;
 
@@ -37,9 +39,15 @@ const app = express();
 const server = http.createServer(app);
 
 // ── Database ──────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("[DB] Connected to MongoDB"))
-    .catch(err => console.error("[DB] Connection error:", err.message));
+async function connectDB() {
+    try {
+        await mongoose.connect(process.env.MONGO_URI);
+        console.log("[DB] Connected to MongoDB");
+    } catch (err) {
+        console.error("[DB] Connection error:", err.message);
+    }
+}
+connectDB();
 
 app.use(express.json());
 
@@ -80,6 +88,9 @@ function broadcast(eventData) {
 }
 
 // ── REST API ──────────────────────────────────────────────────────────────
+
+// Mount entity profile routes
+app.use("/entity", entityProfileRoutes);
 
 /**
  * GET /position/:address
@@ -136,14 +147,30 @@ app.post("/award", async (req, res) => {
             return res.status(400).json({ error: "entity, amount, reason required" });
         }
 
-        // Optional signature verification (backward-compatible)
+        // --- Government Authority Enforcement ---
+        let authorized = false;
         if (signature) {
-            const message = `award:${amount}:${reason}`;
-            const recovered = ethers.verifyMessage(message, signature);
-            if (recovered.toLowerCase() !== entity.toLowerCase()) {
-                return res.status(400).json({ error: "Signature does not match entity" });
+            // New Government Authority Signature Enforcement
+            const verificationResult = verifyGovernmentSignature(signature);
+            if (!verificationResult.ok) {
+                return res.status(403).json({ error: verificationResult.error });
+            }
+            authorized = true;
+        } else {
+            // Backward compatibility / local dev:
+            // Allow if backend signer IS the government wallet
+            if (isBackendTheGovernment(req.app.get("ethersProvider")?.getSigner()?.address || "")) {
+                authorized = true;
+            } else if (process.env.NODE_ENV !== 'production' && !GOVERNMENT_WALLET) {
+                // If no government wallet configured in dev, allow all (fallback)
+                authorized = true;
             }
         }
+
+        if (!authorized) {
+            return res.status(403).json({ error: "Access denied: Government Authority required." });
+        }
+        // --- End Government Authority Enforcement ---
 
         const receipt = await awardCredits(entity, BigInt(amount), reason);
         res.json({ success: true, txHash: receipt.hash });

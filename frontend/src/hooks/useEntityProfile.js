@@ -56,7 +56,11 @@ export function useEntityProfile() {
             const res = await fetch(`${BACKEND_URL}/entity/profile`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ accountId, businessName: name }),
+                body: JSON.stringify({
+                    accountId,
+                    businessName: name,
+                    walletAddress: address,  // include raw address for Government lookup
+                }),
             });
 
             const data = await res.json();

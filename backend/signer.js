@@ -47,4 +47,5 @@ module.exports = {
     recordDebt,
     clearDebt,
     provider,
+    wallet,
 };
