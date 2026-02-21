@@ -9,6 +9,7 @@
 import { usePublicCarbonData } from '../hooks/usePublicCarbonData'
 import { GlobalStats } from '../components/GlobalStats'
 import { FirmTable } from '../components/FirmTable'
+import '../App.css'
 import '../styles/dashboard.css'
 
 const REFRESH_INTERVAL_S = 30
@@ -24,18 +25,21 @@ export default function PublicDashboard() {
     return (
         <div className="pd-root">
             {/* ── Header ─────────────────────────────────────────────────────── */}
-            <header className="pd-header">
-                <div className="pd-header-left">
-                    <span className="pd-logo">🌿</span>
-                    <div>
-                        <h1 className="pd-title">CarboCred — Public Emissions Dashboard</h1>
-                        <p className="pd-subtitle">
-                            Trustless · Read-only · All data sourced directly from the blockchain
-                        </p>
+            <header className="header" style={{ position: 'sticky', top: 0, zIndex: 100, background: 'rgba(3, 7, 18, 0.8)', backdropFilter: 'blur(8px)' }}>
+                <div className="header-left">
+                    <span className="logo">🌿</span>
+                    <div className="brand">
+                        <h1 style={{ margin: 0, fontSize: '1.25rem', letterSpacing: '-0.02em' }}>CarboCred</h1>
+                    </div>
+                    <span className="badge">Public Emissions Dashboard</span>
+
+                    <div className="header-tabs">
+                        <a href="/" className="nav-link">← Back to App</a>
+                        <span className="nav-link active">Public Dashboard</span>
                     </div>
                 </div>
 
-                <div className="pd-header-right">
+                <div className="header-right">
                     {/* Auto-refresh indicator */}
                     <div className="pd-refresh-info">
                         {loading && <span className="pd-spinner" />}
@@ -47,13 +51,13 @@ export default function PublicDashboard() {
                         )}
                     </div>
                     <button
-                        className="pd-btn pd-btn--outline"
+                        className="btn btn-outline"
+                        style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
                         onClick={refresh}
                         disabled={loading}
                     >
                         {loading ? 'Loading…' : '⟳ Refresh'}
                     </button>
-                    <a href="/" className="pd-btn pd-btn--ghost">← Back to App</a>
                 </div>
             </header>
 

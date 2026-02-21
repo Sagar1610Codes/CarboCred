@@ -30,12 +30,12 @@ export function GlobalStats({ stats, loading }) {
             value: loading ? null : stats?.firmCount?.toString() ?? '0',
             color: 'blue',
         },
-        {
-            icon: '🔁',
-            label: 'On-chain Events',
-            value: loading ? null : stats?.totalEvents?.toString() ?? '0',
-            color: 'purple',
-        },
+        // {
+        //     icon: '🔁',
+        //     label: 'On-chain Events',
+        //     value: loading ? null : stats?.totalEvents?.toString() ?? '0',
+        //     color: 'purple',
+        // },
         {
             icon: '✅',
             label: 'Net-Positive Firms',

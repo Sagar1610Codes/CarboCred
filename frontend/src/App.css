@@ -85,23 +85,36 @@ body {
   letter-spacing: -0.01em;
 }
 
+.header-tabs {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-left: 1rem;
+}
+
 .nav-link {
   color: #94a3b8;
   text-decoration: none;
   font-size: 0.85rem;
   font-weight: 500;
-  margin-left: 1rem;
   padding: 0.4rem 0.8rem;
   border-radius: 0.5rem;
   background: rgba(30, 41, 59, 0.5);
   border: 1px solid #334155;
   transition: all 0.2s;
+  cursor: pointer;
 }
 
 .nav-link:hover {
   color: #fff;
   background: #1e293b;
   border-color: #475569;
+}
+
+.nav-link.active {
+  color: #fff;
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.3);
 }
 
 .logo {

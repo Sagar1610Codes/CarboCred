@@ -173,41 +173,26 @@ export default function App() {
           <span className="badge">ERC-1155 Marketplace</span>
 
           {!isGovernment && (
-            <div className="header-tabs" style={{ display: 'flex', gap: '1rem', marginLeft: '1rem' }}>
+            <div className="header-tabs">
               <button
-                className={`nav-link ${currentView === 'marketplace' ? 'active-tab' : ''}`}
+                className={`nav-link ${currentView === 'marketplace' ? 'active' : ''}`}
                 onClick={() => setCurrentView('marketplace')}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
               >
                 Marketplace
               </button>
               <button
-                className={`nav-link ${currentView === 'history' ? 'active-tab' : ''}`}
+                className={`nav-link ${currentView === 'history' ? 'active' : ''}`}
                 onClick={() => setCurrentView('history')}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
               >
                 My History
               </button>
               <button
-                className={`nav-link ${currentView === 'verify' ? 'active-tab' : ''}`}
+                className={`nav-link ${currentView === 'verify' ? 'active' : ''}`}
                 onClick={() => setCurrentView('verify')}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
               >
                 Verify QR
               </button>
-              <a
-                href="/public-dashboard.html"
-                style={{
-                  color: '#94a3b8',
-                  textDecoration: 'none',
-                  fontSize: '0.95rem',
-                  fontWeight: 500,
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-                onMouseOver={e => e.target.style.color = '#fff'}
-                onMouseOut={e => e.target.style.color = '#94a3b8'}
-              >
+              <a href="/public-dashboard.html" className="nav-link">
                 Public Dashboard
               </a>
             </div>

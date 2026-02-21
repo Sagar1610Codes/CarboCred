@@ -22,6 +22,7 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:4000'
 const TOKEN_ADDR = /** @type {`0x${string}`} */ (
     import.meta.env.VITE_CARBON_CREDIT_TOKEN_ADDRESS ?? '0x0'
 )
+const GOVERNMENT_WALLET = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'.toLowerCase()
 const REFRESH_MS = 30_000
 
 /** Singleton public client — read-only, no signer */
@@ -62,7 +63,10 @@ export function usePublicCarbonData() {
 
         try {
             // 1. Discover all participating addresses from events
-            const addresses = await getAllParticipatingAddresses(publicClient, TOKEN_ADDR)
+            let addresses = await getAllParticipatingAddresses(publicClient, TOKEN_ADDR)
+
+            // Exclude the government wallet so it's not tracked as a firm
+            addresses = addresses.filter(a => a.toLowerCase() !== GOVERNMENT_WALLET)
 
             // 2. Fetch balances in parallel
             const balances = await Promise.all(
@@ -72,7 +76,8 @@ export function usePublicCarbonData() {
             )
 
             // 3. Fetch recent events (for activity feed + stats)
-            const events = await getRecentTransfers(publicClient, TOKEN_ADDR, 50)
+            let events = await getRecentTransfers(publicClient, TOKEN_ADDR, 50)
+            events = events.filter(ev => ev.entity?.toLowerCase() !== GOVERNMENT_WALLET)
 
             // 4. Enrich firms with last-seen block from events
             const lastBlockMap = new Map()
