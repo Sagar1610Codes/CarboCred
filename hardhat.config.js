@@ -22,9 +22,12 @@ module.exports = {
     },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "",
-      accounts: process.env.DEPLOYER_PRIVATE_KEY
-        ? [process.env.DEPLOYER_PRIVATE_KEY]
-        : [],
+      accounts: (() => {
+        const key = process.env.DEPLOYER_PRIVATE_KEY || "";
+        // Only include the key if it looks like a valid 32-byte hex key
+        const stripped = key.startsWith("0x") ? key.slice(2) : key;
+        return stripped.length === 64 ? [key] : [];
+      })(),
       chainId: 11155111,
     },
   },
